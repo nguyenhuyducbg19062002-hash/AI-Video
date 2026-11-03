@@ -17,5 +17,12 @@ public record JobPayload(
         String flowProjectUrl,
         String aspectRatio,
         int timeoutSeconds,
-        boolean headless) {
+        boolean headless,
+        /** Độ dài video (giây) cần chọn trên nền tảng; null = để mặc định / theo prompt. Chỉ dùng cho VIDEO. */
+        Integer durationSeconds,
+        /** Chất lượng tải video về: 480p | 720p | 1080p. */
+        String videoQuality,
+        /** "Sửa trên Flow": yêu cầu sửa + địa chỉ màn chỉnh sửa của kết quả cũ. null = tạo mới. */
+        String editInstruction,
+        String editSourceUrl) {
 }

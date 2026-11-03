@@ -8,8 +8,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -24,7 +22,7 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class AccountController {
 
-    static final String FLOW_URL = "https://labs.google/fx/tools/flow";
+    static final String FLOW_URL = "https://flow.google.com/";
 
     private final AccountRepository accounts;
 
@@ -92,13 +90,10 @@ public class AccountController {
                 .orElseThrow(() -> new IllegalStateException("Không tìm thấy Microsoft Edge trên máy"));
         a.needLogin("đang đăng nhập");   // không READY ⇒ không bị giao job trong lúc profile đang mở
         Files.createDirectories(Path.of(a.getProfileDir()));
-        // Trang đăng nhập Google điền sẵn email; đăng nhập xong tự chuyển sang Flow. Mật khẩu do người dùng tự gõ.
-        String loginUrl = "https://accounts.google.com/AccountChooser?Email="
-                + URLEncoder.encode(a.getEmail(), StandardCharsets.UTF_8)
-                + "&continue=" + URLEncoder.encode(FLOW_URL, StandardCharsets.UTF_8);
-        // Gọi thẳng msedge.exe (không qua "cmd /c start": cmd cắt URL ở ký tự &)
+        // Mở thẳng trang Google Flow; người dùng bấm "Sign in" trên Flow và tự đăng nhập.
+        // (Không dùng accounts.google.com/AccountChooser?Email=…: Google trả lỗi 400 Bad Request cho link này.)
         new ProcessBuilder(edge.toString(), "--user-data-dir=" + a.getProfileDir(),
-                "--no-first-run", "--no-default-browser-check", loginUrl).start();
+                "--no-first-run", "--no-default-browser-check", FLOW_URL).start();
         return a;
     }
 
@@ -146,7 +141,7 @@ public class AccountController {
     }
 
     private static void applyForm(AccountEntity a, AccountForm f) {
-        a.setProxy(blankToNull(f.proxy()));
+        a.setProxy(validateProxy(blankToNull(f.proxy())));
         a.setNotes(blankToNull(f.notes()));
         a.setCredentialFile(blankToNull(f.credentialFile()));
         a.setGcpProject(blankToNull(f.gcpProject()));
@@ -158,5 +153,28 @@ public class AccountController {
 
     private static String blankToNull(String s) {
         return s == null || s.isBlank() ? null : s.trim();
+    }
+
+    /** ip:port | ip:port:user:pass | http(s)/socks5://[user:pass@]host:port */
+    private static final java.util.regex.Pattern PROXY_PLAIN =
+            java.util.regex.Pattern.compile("^[A-Za-z0-9.-]+:\\d{1,5}(:[^:\\s]+:[^:\\s]+)?$");
+    private static final java.util.regex.Pattern PROXY_URL =
+            java.util.regex.Pattern.compile("^(https?|socks5)://([^:@\\s/]+(:[^@\\s/]*)?@)?[A-Za-z0-9.-]+:\\d{1,5}/?$");
+
+    /** Proxy sai dạng làm mọi lần mở Edge thất bại (ERR_PROXY_CONNECTION_FAILED): chặn ngay khi lưu. */
+    static String validateProxy(String proxy) {
+        if (proxy == null) {
+            return null;
+        }
+        if (!PROXY_PLAIN.matcher(proxy).matches() && !PROXY_URL.matcher(proxy).matches()) {
+            throw new IllegalArgumentException("Proxy \"" + (proxy.length() > 40 ? proxy.substring(0, 40) + "…" : proxy)
+                    + "\" không đúng dạng. Dùng ip:port, ip:port:user:pass hoặc http://user:pass@ip:port. Không dùng proxy thì để trống.");
+        }
+        String portPart = proxy.replaceFirst("^.*?([A-Za-z0-9.-]+):(\\d{1,5}).*$", "$2");
+        int port = Integer.parseInt(portPart);
+        if (port < 1 || port > 65535) {
+            throw new IllegalArgumentException("Cổng proxy " + port + " không hợp lệ (1–65535)");
+        }
+        return proxy;
     }
 }

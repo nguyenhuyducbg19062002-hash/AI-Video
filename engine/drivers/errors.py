@@ -36,7 +36,30 @@ class ConfigError(WorkerError):
     code = "CONFIG_ERROR"
 
 
+class PausedByUser(WorkerError):
+    """Người dùng đóng cửa sổ Flow hoặc bấm "Tạm dừng phim": backend đưa cảnh về hàng đợi và tạm dừng phim."""
+    code = "PAUSED"
+
+
+class AccountBroken(WorkerError):
+    """Tài khoản không dùng được vì cấu hình của chính nó (proxy sai / không kết nối được): backend tắt tài khoản."""
+    code = "ACCOUNT_BROKEN"
+
+
+# Lỗi mạng của Chromium/Edge do PROXY của tài khoản (không phải mạng chập chờn tạm thời)
+PROXY_ERRORS = ("ERR_PROXY_CONNECTION_FAILED", "ERR_TUNNEL_CONNECTION_FAILED", "ERR_NO_SUPPORTED_PROXIES",
+                "ERR_PROXY_AUTH_UNSUPPORTED", "ERR_PROXY_CERTIFICATE_INVALID", "ERR_SOCKS_CONNECTION_FAILED",
+                "ERR_MANDATORY_PROXY_CONFIGURATION_FAILED", "ERR_PROXY_AUTH_REQUESTED")
+
+
+def proxy_error(message: str) -> str | None:
+    """Tên lỗi proxy nếu thông báo lỗi là do proxy, ngược lại None."""
+    return next((code for code in PROXY_ERRORS if code in (message or "")), None)
+
+
 @dataclass
 class GenerationResult:
     staged_file: Path
     remote_ref: str | None = None
+    # địa chỉ màn chỉnh sửa của kết quả trên Flow (…/edit/<media>): dùng cho "Sửa trên Flow"
+    media_url: str | None = None

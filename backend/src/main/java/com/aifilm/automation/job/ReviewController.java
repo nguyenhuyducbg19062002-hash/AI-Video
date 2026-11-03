@@ -24,8 +24,9 @@ public class ReviewController {
     private final JobQueryService query;
 
     @GetMapping("/projects/{projectId}/jobs")
-    public List<JobView> list(@PathVariable long projectId, @RequestParam(required = false) JobStatus status) {
-        return query.list(projectId, status);
+    public List<JobView> list(@PathVariable long projectId, @RequestParam(required = false) JobStatus status,
+                              @RequestParam(defaultValue = "true") boolean full) {
+        return query.list(projectId, status, full);
     }
 
     @GetMapping("/jobs/{id}")
@@ -36,6 +37,20 @@ public class ReviewController {
     @GetMapping("/jobs/{id}/history")
     public Map<String, Object> history(@PathVariable long id) {
         return query.history(id);
+    }
+
+    /** "Đưa file đã tải về vào app": chọn file ảnh / video cho cảnh này, app lưu vào folder và đánh dấu xong. */
+    @PostMapping(value = "/jobs/{id}/manual-result", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public JobView manualResult(@PathVariable long id, @RequestParam("file") org.springframework.web.multipart.MultipartFile file) {
+        return query.view(review.manualResult(id, file).getId());
+    }
+
+    public record FlowEditRequest(String instruction) {}
+
+    /** "Sửa trên Flow": gửi yêu cầu sửa cho chính video cũ trên Flow thay vì tạo lại từ đầu. */
+    @PostMapping("/jobs/{id}/flow-edit")
+    public JobView flowEdit(@PathVariable long id, @RequestBody FlowEditRequest r) {
+        return query.view(review.flowEdit(id, r.instruction()).getId());
     }
 
     @PostMapping("/jobs/{id}/approve")
@@ -62,7 +77,21 @@ public class ReviewController {
     @PostMapping("/jobs/{id}/regenerate")
     public JobView regenerate(@PathVariable long id, @RequestBody(required = false) RegenerateRequest r) {
         RegenerateRequest req = r == null ? new RegenerateRequest(null, null) : r;
-        return query.view(review.regenerate(id, req.promptText(), req.note()).getId());
+        return query.view(review.regenerateAndRun(id, req.promptText(), req.note()).getId());
+    }
+
+    /** "Chạy cảnh này": đưa cảnh lên đầu hàng đợi và cho phim chạy. */
+    public record RunSelectedRequest(List<Long> jobIds, Boolean only, Boolean append) {}
+
+    /** Chạy các cảnh đã chọn (theo thứ tự chọn); only = chỉ chạy các cảnh này rồi tự dừng. */
+    @PostMapping("/projects/{projectId}/run-selected")
+    public ReviewService.RunSelectedResult runSelected(@PathVariable long projectId, @RequestBody RunSelectedRequest r) {
+        return review.runSelected(projectId, r.jobIds(), Boolean.TRUE.equals(r.only()), Boolean.TRUE.equals(r.append()));
+    }
+
+    @PostMapping("/jobs/{id}/run-now")
+    public JobView runNow(@PathVariable long id) {
+        return query.view(review.runNow(id).getId());
     }
 
     @PostMapping("/jobs/{id}/cancel")

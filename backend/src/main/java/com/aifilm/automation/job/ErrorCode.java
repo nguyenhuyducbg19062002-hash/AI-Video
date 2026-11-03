@@ -12,7 +12,11 @@ public enum ErrorCode {
     TRANSIENT,
     CANCELLED,
     /** Worker chưa được cấu hình đúng (selector Flow…): dừng project, không đốt hết job. */
-    CONFIG_ERROR;
+    CONFIG_ERROR,
+    /** Tài khoản không dùng được vì cấu hình của chính nó (proxy sai / không kết nối được): tắt tài khoản, job sang tài khoản khác. */
+    ACCOUNT_BROKEN,
+    /** Người dùng đóng cửa sổ Flow hoặc bấm "Tạm dừng phim": job về hàng đợi (không tính lỗi), phim tạm dừng. */
+    PAUSED;
 
     public static ErrorCode parse(String s) {
         try {

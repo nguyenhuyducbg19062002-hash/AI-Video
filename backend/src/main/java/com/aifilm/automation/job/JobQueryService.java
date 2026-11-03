@@ -22,17 +22,21 @@ public class JobQueryService {
     private final PromptReferenceRepository references;
     private final AccountRepository accounts;
     private final JobEventRepository events;
+    private final ProjectAssetRepository assets;
 
-    /** Danh sách job của project: ảnh trước video, theo STT. Một phim khoảng 340 dòng nên nạp hết một lần. */
+    /**
+     * Danh sách job của project theo đúng thứ tự file. full=false bỏ nội dung prompt (một phim panel có 1.200 cảnh,
+     * prompt dài tới 14.000 ký tự: kèm prompt thì mỗi lần làm mới nặng vài MB); giao diện lấy prompt khi mở một cảnh.
+     */
     @Transactional(readOnly = true)
-    public List<JobView> list(long projectId, JobStatus status) {
+    public List<JobView> list(long projectId, JobStatus status, boolean full) {
         List<JobEntity> list = status == null ? jobs.findByProjectId(projectId) : jobs.findByProjectIdAndStatus(projectId, status);
-        return views(list);
+        return views(list, full);
     }
 
     @Transactional(readOnly = true)
     public JobView view(long jobId) {
-        return views(List.of(jobs.findById(jobId).orElseThrow())).get(0);
+        return views(List.of(jobs.findById(jobId).orElseThrow()), true).get(0);
     }
 
     @Transactional(readOnly = true)
@@ -77,7 +81,7 @@ public class JobQueryService {
         };
     }
 
-    private List<JobView> views(List<JobEntity> list) {
+    private List<JobView> views(List<JobEntity> list, boolean full) {
         if (list.isEmpty()) {
             return List.of();
         }
@@ -86,10 +90,20 @@ public class JobQueryService {
         Map<Long, PromptRevisionEntity> revById = revisions.findAllById(promptById.values().stream()
                         .map(PromptEntity::getCurrentRevisionId).filter(Objects::nonNull).toList())
                 .stream().collect(Collectors.toMap(PromptRevisionEntity::getId, Function.identity()));
-        Map<Long, List<String>> refsByPrompt = references.findByVideoPromptIdIn(promptById.keySet()).stream()
+        Map<Long, List<PromptReferenceEntity>> refsByPrompt = references.findByVideoPromptIdIn(promptById.keySet()).stream()
                 .sorted(Comparator.comparingInt(PromptReferenceEntity::getOrdinal))
-                .collect(Collectors.groupingBy(PromptReferenceEntity::getVideoPromptId, LinkedHashMap::new,
-                        Collectors.mapping(PromptReferenceEntity::getRefExternalId, Collectors.toList())));
+                .collect(Collectors.groupingBy(PromptReferenceEntity::getVideoPromptId, LinkedHashMap::new, Collectors.toList()));
+        Set<String> inStore = new HashSet<>();
+        // ảnh mà app sẽ tạo (có prompt ở tab Tạo ảnh): ID → trạng thái job tạo ảnh đó
+        Map<String, JobStatus> producerStatus = new HashMap<>();
+        promptById.values().stream().map(PromptEntity::getProjectId).distinct().forEach(pid -> {
+            assets.findByProjectId(pid).forEach(a -> inStore.add(a.getExternalId()));
+            Map<Long, String> imageIdByPrompt = new HashMap<>();
+            prompts.findByProjectId(pid).stream().filter(p -> p.getKind() == PromptKind.IMAGE)
+                    .forEach(p -> imageIdByPrompt.put(p.getId(), p.getExternalId()));
+            jobs.findByPromptIdIn(imageIdByPrompt.keySet())
+                    .forEach(j -> producerStatus.put(imageIdByPrompt.get(j.getPromptId()), j.getStatus()));
+        });
         Map<Long, String> emailById = accounts.findAll().stream()
                 .collect(Collectors.toMap(AccountEntity::getId, AccountEntity::getEmail));
 
@@ -97,16 +111,25 @@ public class JobQueryService {
                 .map(j -> {
                     PromptEntity p = promptById.get(j.getPromptId());
                     PromptRevisionEntity rev = revById.get(p.getCurrentRevisionId());
+                    List<PromptReferenceEntity> refs = refsByPrompt.getOrDefault(p.getId(), List.of());
                     return new JobView(
                             j.getId(), p.getId(), p.getKind().name(), p.getExternalId(), p.getSeqNo(), j.getStatus(),
-                            rev == null ? "" : rev.getPromptText(), rev == null ? 0 : rev.getRevisionNo(),
-                            p.getSummaryVi(), refsByPrompt.getOrDefault(p.getId(), List.of()),
+                            !full || rev == null ? null : rev.getPromptText(), rev == null ? 0 : rev.getRevisionNo(),
+                            p.getSummaryVi(), refs.stream().map(PromptReferenceEntity::getRefExternalId).toList(),
+                            refs.stream().map(r -> new JobView.RefView(r.getRefExternalId(), inStore.contains(r.getRefExternalId()), r.isUserAdded(),
+                                    Optional.ofNullable(producerStatus.get(r.getRefExternalId())).map(Enum::name).orElse(null))).toList(),
+                            p.getSourceName(), p.getSourceOrder() == null ? 0 : p.getSourceOrder(),
+                            p.getKind() == PromptKind.IMAGE && inStore.contains(p.getExternalId()),
                             j.getAccountId() == null ? null : emailById.get(j.getAccountId()),
                             j.getAttempt(), j.getErrorCode(), j.getErrorMessage(), j.getPreviewPath() != null,
                             previewType(j.getPreviewPath()),
-                            j.getFinalPath(), j.getRemoteRef(), j.isCancelRequested(), j.getGeneratedAt(), j.getUpdatedAt());
+                            j.getFinalPath(), j.getRemoteRef(), j.isCancelRequested(),
+                            p.getKind() == PromptKind.VIDEO && j.getFlowMediaUrl() != null && j.getFlowAccountId() != null,
+                            j.getEditInstruction(), j.getGeneratedAt(), j.getUpdatedAt());
                 })
-                .sorted(Comparator.comparing((JobView v) -> v.kind().equals("IMAGE") ? 0 : 1).thenComparingInt(JobView::seqNo))
+                // đúng thứ tự trong file: ảnh trước video, rồi thứ tự file Excel, rồi thứ tự dòng
+                .sorted(Comparator.comparing((JobView v) -> v.kind().equals("IMAGE") ? 0 : 1)
+                        .thenComparingInt(JobView::sourceOrder).thenComparingInt(JobView::seqNo))
                 .toList();
     }
 }

@@ -1,21 +1,59 @@
 {
-  "_huong_dan": "Selector của Google Flow. Giá trị TODO = chưa cấu hình. Chế độ BACKGROUND cần đủ các khóa chính; FOREGROUND chạy được cả khi còn TODO (người dùng tự làm phần thiếu). Ghi lại bằng: python -m playwright codegen --channel msedge https://labs.google/fx/tools/flow . Ưu tiên selector theo vai trò/nhãn, ví dụ: role=button[name=\"Tạo\"] hoặc [aria-label*=\"Generate\"].",
+  "_huong_dan": "Selector của Google Flow (flow.google.com, giao diện 11/2026). Giá trị TODO = chưa xác nhận. Các giá trị KHÔNG phải TODO đã được đọc trực tiếp trên trang Flow thật ngày 2026-11-03. Ghi thêm bằng: python -m playwright codegen --channel msedge https://flow.google.com/",
+  "_da_xac_nhan": "Đã chạy thật 2026-11-03. Tài khoản giao diện tiếng Việt, bố cục Tác nhân: tạo 1 ảnh PANEL-1 + tải về. Tài khoản giao diện tiếng Anh, bố cục tạo trực tiếp: đọc nút (Settings trigger, Add ingredients…, Upload media, Start generation), chưa tạo. Mỗi selector ghi cả 2 ngôn ngữ, cách nhau bằng dấu phẩy. Chưa thử: video (độ dài, chất lượng), thông báo hết lượt / vi phạm.",
+  "new_project_button": "button:has-text('Dự án mới'), button:has-text('New project')",
   "mode_buttons": {
     "IMAGE": "TODO",
     "VIDEO": "TODO"
   },
-  "add_reference_button": "TODO",
-  "reference_thumbnail": "TODO",
-  "prompt_box": "textarea, div[contenteditable='true'], div[role='textbox']",
-  "generate_button": "TODO",
-  "result_card": "TODO",
-  "result_ready_marker": "TODO",
-  "download_button": "TODO",
-  "download_quality_option": null,
+  "settings_button": "[aria-label='Settings trigger'], [aria-label='Cài đặt'], [aria-label='Trình kích hoạt cài đặt']",
+  "settings_save": "button:has-text('Lưu'), button:has-text('Save')",
+  "agent_never_confirm": "^\\s*(Không bao giờ|Never)(\\s|$)",
+  "add_reference_button": "[aria-label='Thêm thành phần vào ô nhập câu lệnh'], [aria-label='Add ingredients to the prompt box']",
+  "upload_button": "button:has-text('Tải nội dung nghe nhìn lên'), button:has-text('Upload media')",
+  "uploading_texts": [
+    "Đang tải lên",
+    "Uploading"
+  ],
+  "ingredient_search": "input[placeholder='Tìm kiếm thành phần'], input[placeholder='Search assets']",
+  "ingredient_listbox": "[role=listbox][aria-label='Danh sách thành phần'], [role=listbox]:has(button[role=option])",
+  "ingredient_option": "button[role=option]",
+  "prompt_box": "div[role='textbox'][contenteditable='true']",
+  "generate_button": "[aria-label='Bắt đầu tạo'], [aria-label='Start generation']",
+  "agent_reply_marker": "[aria-label='Câu trả lời tốt'], [aria-label='Good response']",
+  "agent_auto_reply": "Yes, proceed exactly as planned. Generate it now.",
+  "result_card": "flow-grid-tile-container",
+  "result_media": "[data-media-id]",
+  "tile_menu_button": "[aria-label='Tuỳ chọn khác'], [aria-label='More options']",
+  "download_menu_item": "[role=menuitem]:has-text('download')",
+  "download_quality_option": "[role=menuitem]:not([disabled]):has(.label:text-is('{quality}'))",
+  "image_download_quality": "1K",
+  "duration_menu": "TODO: nút mở chọn độ dài video (bỏ trống nếu các lựa chọn hiện sẵn)",
+  "duration_option": "TODO: lựa chọn độ dài, có chỗ {seconds}, ví dụ role=option[name*=\"{seconds}s\"]",
   "quota_texts": [
-    "TODO: chép nguyên văn thông báo hết lượt/credit của Flow"
+    "Bạn đã hết tín dụng",
+    "không đủ tín dụng",
+    "Không đủ tín dụng",
+    "đã đạt đến giới hạn",
+    "đã đạt giới hạn",
+    "đã hết hạn mức",
+    "out of credits",
+    "Not enough credits",
+    "not enough credits",
+    "reached your limit",
+    "reached the limit",
+    "daily limit",
+    "quota exceeded"
   ],
   "policy_texts": [
-    "TODO: chép nguyên văn thông báo vi phạm chính sách của Flow"
-  ]
+    "vi phạm chính sách",
+    "không thể tạo nội dung này",
+    "violates our policies",
+    "violate our policies",
+    "might violate",
+    "can't generate this",
+    "couldn't generate"
+  ],
+  "_ghi_chu_thong_bao": "quota_texts / policy_texts: câu đoán theo cách Flow thường viết, CHƯA thấy tận mắt. Gặp thông báo thật thì chép nguyên văn vào đây. Ở chế độ Mở Flow có nút \"Tài khoản hết lượt → đổi tài khoản\".",
+  "edit_prompt_box": "[role=textbox][aria-label^='Describe how to edit'], [role=textbox][aria-label^='Mô tả cách chỉnh sửa'], [role=textbox][contenteditable=true]"
 }

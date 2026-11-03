@@ -41,6 +41,12 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Không tìm thấy"));
     }
 
+    /** Trình duyệt ngắt luồng video / ảnh giữa chừng (người dùng chuyển mục khi đang xem): không phải lỗi. */
+    @ExceptionHandler(org.springframework.web.context.request.async.AsyncRequestNotUsableException.class)
+    public void clientGone() {
+        // bỏ qua
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, String>> other(Exception e) {
         log.error("Lỗi không lường trước", e);

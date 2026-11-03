@@ -25,9 +25,18 @@ public class PromptReferenceEntity {
     @Column(nullable = false, length = 100)
     private String refExternalId;
 
-    public PromptReferenceEntity(Long videoPromptId, int ordinal, String refExternalId) {
+    /** IMPORT (từ cột Reference IDs của Excel) | USER (người dùng thêm bằng nút "+"). null = IMPORT (dữ liệu cũ). */
+    @Column(length = 10)
+    private String source;
+
+    public PromptReferenceEntity(Long videoPromptId, int ordinal, String refExternalId, String source) {
         this.videoPromptId = videoPromptId;
         this.ordinal = ordinal;
         this.refExternalId = refExternalId;
+        this.source = source;
+    }
+
+    public boolean isUserAdded() {
+        return "USER".equals(source);
     }
 }

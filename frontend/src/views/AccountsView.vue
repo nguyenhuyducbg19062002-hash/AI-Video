@@ -74,7 +74,7 @@
 
     <!-- Thêm / sửa -->
     <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-[2px]">
-      <form @submit.prevent="save" class="card w-full max-w-lg shadow-2xl">
+      <form @submit.prevent="save" class="card w-full max-w-lg shadow-2xl" autocomplete="off">
         <div class="card-head items-center">
           <User class="w-5 h-5 text-indigo-500" />
           <div class="card-title flex-1">{{ editing ? 'Sửa tài khoản' : 'Thêm tài khoản' }}</div>
@@ -83,7 +83,9 @@
         <div class="p-5 space-y-4">
           <div>
             <label class="label">Email <span class="text-rose-500">*</span></label>
-            <input v-model="form.email" :disabled="!!editing" required class="input" placeholder="ten@gmail.com" />
+            <input v-model="form.email" :disabled="!!editing" required class="input" placeholder="ten@gmail.com"
+              name="afm-account-email" autocomplete="off" />
+            <p class="hint">App không cần và không lưu mật khẩu Google: bạn tự đăng nhập một lần bằng nút "Đăng nhập".</p>
           </div>
           <div class="grid grid-cols-2 gap-3">
             <div>
@@ -100,8 +102,11 @@
             </div>
           </div>
           <div v-if="form.provider === 'FLOW_BROWSER'">
-            <label class="label">Proxy (tùy chọn)</label>
-            <input v-model="form.proxy" class="input font-mono" placeholder="ip:port:user:pass hoặc http://ip:port" />
+            <label class="label">Proxy (tùy chọn, không dùng thì để trống)</label>
+            <!-- name/autocomplete lạ để trình duyệt không tự điền mật khẩu đã lưu vào ô này -->
+            <input v-model="form.proxy" class="input font-mono" placeholder="Để trống nếu không dùng proxy"
+              name="afm-proxy-server" autocomplete="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-form-type="other" />
+            <p class="hint">Dạng: <span class="font-mono">ip:port</span>, <span class="font-mono">ip:port:user:pass</span> hoặc <span class="font-mono">http://user:pass@ip:port</span>. Đây <b>không phải</b> chỗ nhập mật khẩu Google.</p>
           </div>
           <template v-if="form.provider === 'VERTEX_API'">
             <div>

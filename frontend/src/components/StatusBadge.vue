@@ -24,7 +24,7 @@ const MAP = {
   // tài khoản
   READY: ['Sẵn sàng', 'bg-emerald-50 text-emerald-700 border-emerald-200', 'bg-emerald-500'],
   LEASED: ['Đang chạy', 'bg-sky-50 text-sky-700 border-sky-200', 'bg-sky-500 animate-pulse'],
-  COOLDOWN: ['Nghỉ (quota)', 'bg-amber-50 text-amber-700 border-amber-200', 'bg-amber-500'],
+  COOLDOWN: ['Tạm nghỉ', 'bg-amber-50 text-amber-700 border-amber-200', 'bg-amber-500'],
   NEED_LOGIN: ['Cần đăng nhập', 'bg-orange-50 text-orange-700 border-orange-200', 'bg-orange-500'],
   DISABLED: ['Đã tắt', 'bg-slate-50 text-slate-500 border-slate-200', 'bg-slate-400'],
   // phim

@@ -81,7 +81,8 @@ class VertexDriver:
         ref_images = [types.VideoGenerationReferenceImage(image=types.Image.from_file(location=p), reference_type="asset")
                       for p in refs]
         config = types.GenerateVideosConfig(number_of_videos=1, aspect_ratio=job.get("aspectRatio") or "16:9",
-                                            reference_images=ref_images or None)
+                                            reference_images=ref_images or None,
+                                            duration_seconds=job.get("durationSeconds") or None)
         op = client.models.generate_videos(model=VIDEO_MODEL, prompt=job["prompt"], config=config)
         deadline = time.monotonic() + job["timeoutSeconds"]
         while not op.done:
