@@ -1,0 +1,21 @@
+{
+  "_huong_dan": "Selector của Google Flow. Giá trị TODO = chưa cấu hình. Chế độ BACKGROUND cần đủ các khóa chính; FOREGROUND chạy được cả khi còn TODO (người dùng tự làm phần thiếu). Ghi lại bằng: python -m playwright codegen --channel msedge https://labs.google/fx/tools/flow . Ưu tiên selector theo vai trò/nhãn, ví dụ: role=button[name=\"Tạo\"] hoặc [aria-label*=\"Generate\"].",
+  "mode_buttons": {
+    "IMAGE": "TODO",
+    "VIDEO": "TODO"
+  },
+  "add_reference_button": "TODO",
+  "reference_thumbnail": "TODO",
+  "prompt_box": "textarea, div[contenteditable='true'], div[role='textbox']",
+  "generate_button": "TODO",
+  "result_card": "TODO",
+  "result_ready_marker": "TODO",
+  "download_button": "TODO",
+  "download_quality_option": null,
+  "quota_texts": [
+    "TODO: chép nguyên văn thông báo hết lượt/credit của Flow"
+  ],
+  "policy_texts": [
+    "TODO: chép nguyên văn thông báo vi phạm chính sách của Flow"
+  ]
+}
