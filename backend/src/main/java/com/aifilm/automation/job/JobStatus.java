@@ -12,14 +12,15 @@ public enum JobStatus {
     private static final Map<JobStatus, Set<JobStatus>> NEXT = new EnumMap<>(JobStatus.class);
 
     static {
-        NEXT.put(PENDING, EnumSet.of(GENERATING, CANCELLED));
+        // PENDING / FAILED / CANCELLED → AWAITING_REVIEW: người dùng tự đưa file kết quả (tải tay từ Flow) vào app
+        NEXT.put(PENDING, EnumSet.of(GENERATING, CANCELLED, AWAITING_REVIEW));
         NEXT.put(GENERATING, EnumSet.of(AWAITING_REVIEW, PENDING, FAILED, CANCELLED));
         NEXT.put(AWAITING_REVIEW, EnumSet.of(APPROVED, PENDING, CANCELLED));
         NEXT.put(APPROVED, EnumSet.of(DOWNLOADING, PENDING, CANCELLED));
         NEXT.put(DOWNLOADING, EnumSet.of(SUCCESS, APPROVED));
         NEXT.put(SUCCESS, EnumSet.of(PENDING));
-        NEXT.put(FAILED, EnumSet.of(PENDING, CANCELLED));
-        NEXT.put(CANCELLED, EnumSet.of(PENDING));
+        NEXT.put(FAILED, EnumSet.of(PENDING, CANCELLED, AWAITING_REVIEW));
+        NEXT.put(CANCELLED, EnumSet.of(PENDING, AWAITING_REVIEW));
     }
 
     public boolean canMoveTo(JobStatus to) {

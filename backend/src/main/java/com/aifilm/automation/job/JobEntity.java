@@ -42,8 +42,23 @@ public class JobEntity {
     private int attempt;
     private boolean cancelRequested;
 
+    /**
+     * "Chạy cảnh này": số lớn hơn được giao trước mọi job khác (kể cả khi phim đang chờ duyệt hết ảnh).
+     * Kiểu Integer (cho phép null) để thêm cột vào DB cũ không lỗi; null = 0.
+     */
+    private Integer runPriority;
+
     @Column(length = 1000)
     private String remoteRef;
+
+    /** Địa chỉ màn chỉnh sửa của kết quả trên Flow (…/project/<id>/edit/<media>) và tài khoản đã tạo nó: dùng cho "Sửa trên Flow". */
+    @Column(length = 1000)
+    private String flowMediaUrl;
+    private Long flowAccountId;
+
+    /** "Sửa trên Flow": yêu cầu sửa gửi vào ô "Mô tả cách chỉnh sửa video này" của chính kết quả cũ. null = tạo mới bình thường. */
+    @Column(length = 2000)
+    private String editInstruction;
 
     @Column(length = 1000)
     private String previewPath;

@@ -5,6 +5,7 @@ import com.aifilm.automation.job.JobPayload;
 import com.aifilm.automation.job.JobResultService;
 import com.aifilm.automation.job.WorkerReports.ClaimRequest;
 import com.aifilm.automation.job.WorkerReports.FailureReport;
+import com.aifilm.automation.job.WorkerReports.FlowProjectReport;
 import com.aifilm.automation.job.WorkerReports.GeneratedReport;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -35,6 +36,12 @@ public class WorkerController {
     @PostMapping("/jobs/{id}/generated")
     public void generated(@PathVariable long id, @RequestBody GeneratedReport r) {
         results.onGenerated(id, r);
+    }
+
+    /** Driver Flow vừa vào / tạo dự án Flow: nhớ link cho tài khoản này. */
+    @PostMapping("/jobs/{id}/flow-project")
+    public void flowProject(@PathVariable long id, @RequestBody FlowProjectReport r) {
+        results.onFlowProject(id, r.workerId(), r.url());
     }
 
     @PostMapping("/jobs/{id}/failed")

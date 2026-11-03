@@ -3,9 +3,7 @@ package com.aifilm.automation.project;
 import com.aifilm.automation.account.AccountRepository;
 import com.aifilm.automation.account.AccountStatus;
 import com.aifilm.automation.job.*;
-import com.aifilm.automation.prompt.PromptReferenceRepository;
-import com.aifilm.automation.prompt.PromptRepository;
-import com.aifilm.automation.prompt.PromptRevisionRepository;
+import com.aifilm.automation.prompt.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -29,14 +27,19 @@ public class ProjectService {
     private final PromptRevisionRepository revisions;
     private final PromptReferenceRepository references;
     private final AccountRepository accounts;
+    private final ProjectAssetRepository assets;
     private final JobTransitions transitions;
+    private final OmniImportService importer;
+    private final FlowLinkRepository flowLinks;
 
     public record ProjectForm(String name, String code, String sourceDir, String imageDir, String videoDir,
                               RunMode runMode, Provider provider, String flowProjectUrl, String aspectRatio,
-                              Integer maxParallel, Integer maxAttempts, Boolean waitAllImages) {}
+                              Integer maxParallel, Integer maxAttempts, Boolean waitAllImages,
+                              Integer videoDuration, String videoQuality, Boolean skipMissingRefs) {}
 
+    /** missingRefs: Reference ID phim cần mà chưa có prompt tạo ảnh và chưa có ảnh trong kho (ảnh gốc cần "Thêm ảnh có sẵn"). */
     public record ProjectView(ProjectEntity project, Map<String, Long> counts, long total, long imagesTotal,
-                              long imagesDone, long readyAccounts) {}
+                              long imagesDone, long readyAccounts, long assetsCount, List<String> missingRefs) {}
 
     @Transactional(readOnly = true)
     public List<ProjectView> list() {
@@ -75,6 +78,7 @@ public class ProjectService {
         }
         p.setStatus(ProjectStatus.RUNNING);
         p.setPausedReason(null);
+        p.setSelectedOnly(false);   // "Chạy" = chạy cả phim
         verifyFiles(id);   // file đã duyệt mà bị mất/hỏng thì cho chạy lại luôn trong lượt này
         return view(p);
     }
@@ -107,11 +111,31 @@ public class ProjectService {
             j.setErrorCode(null);
             j.setErrorMessage((gone ? "File đã duyệt bị mất" : "File đã duyệt bị hỏng") + ", tạo lại tự động");
             transitions.move(j, JobStatus.PENDING, null, "kiểm tra file: " + problem.get() + " → tạo lại");
+            if (j.getKind() == PromptKind.IMAGE) {
+                // rút ảnh khỏi kho: panel / video dùng ảnh này chờ ảnh mới
+                prompts.findById(j.getPromptId()).flatMap(pr -> assets.findByProjectIdAndExternalId(id, pr.getExternalId()))
+                        .filter(a -> ProjectAssetEntity.SOURCE_APPROVED.equals(a.getSource()))
+                        .ifPresent(assets::delete);
+            }
+        }
+        int requeued = missing + broken;
+        // Ảnh có sẵn (người dùng đưa vào) bị mất/hỏng: không tạo lại được, rút khỏi kho và báo để người dùng thêm lại
+        for (ProjectAssetEntity a : assets.findByProjectId(id)) {
+            if (!ProjectAssetEntity.SOURCE_USER.equals(a.getSource())) {
+                continue;
+            }
+            checked++;
+            Optional<String> problem = MediaCheck.problem(Path.of(a.getFilePath()));
+            if (problem.isPresent()) {
+                if (Files.exists(Path.of(a.getFilePath()))) broken++; else missing++;
+                details.add(a.getExternalId() + " (ảnh có sẵn): " + problem.get() + " → cần thêm lại");
+                assets.delete(a);
+            }
         }
         if (missing + broken > 0) {
-            log.warn("Phim {}: {} file mất, {} file hỏng → đưa về hàng đợi", id, missing, broken);
+            log.warn("Phim {}: {} file mất, {} file hỏng", id, missing, broken);
         }
-        return new VerifyResult(checked, missing, broken, missing + broken, details.subList(0, Math.min(details.size(), 20)));
+        return new VerifyResult(checked, missing, broken, requeued, details.subList(0, Math.min(details.size(), 20)));
     }
 
     /** Quét định kỳ các phim đang chạy (người dùng có thể xóa/ghi đè file trong folder bất cứ lúc nào). */
@@ -134,8 +158,15 @@ public class ProjectService {
     @Transactional
     public int retryFailed(long id) {
         int n = 0;
+        Set<String> provided = new HashSet<>();
+        assets.findByProjectId(id).stream().filter(a -> ProjectAssetEntity.SOURCE_USER.equals(a.getSource()))
+                .forEach(a -> provided.add(a.getExternalId()));
         for (JobStatus s : List.of(JobStatus.FAILED, JobStatus.CANCELLED)) {
             for (JobEntity j : jobs.findByProjectIdAndStatus(id, s)) {
+                if (j.getKind() == PromptKind.IMAGE && prompts.findById(j.getPromptId())
+                        .map(pr -> provided.contains(pr.getExternalId())).orElse(false)) {
+                    continue;   // ảnh này đã có sẵn (người dùng đưa vào): không tạo lại
+                }
                 j.setAttempt(0);
                 j.setErrorCode(null);
                 j.setErrorMessage(null);
@@ -153,6 +184,8 @@ public class ProjectService {
             throw new IllegalStateException("Phim đang có job chạy: tạm dừng và chờ các job đang chạy xong trước khi xóa");
         }
         events.deleteByProjectId(id);
+        flowLinks.deleteByProjectId(id);
+        assets.deleteByProjectId(id);   // chỉ xóa bản ghi kho; file ảnh/video trên đĩa giữ nguyên
         jobs.deleteByProjectId(id);
         references.deleteByProjectId(id);
         revisions.deleteByProjectId(id);
@@ -162,11 +195,11 @@ public class ProjectService {
 
     private void apply(ProjectEntity p, ProjectForm f) {
         require(f.name(), "Tên phim");
-        require(f.sourceDir(), "Thư mục output của Omni-Flash-Pipeline");
         require(f.imageDir(), "Folder Ảnh");
         require(f.videoDir(), "Folder Video");
         p.setName(f.name().trim());
-        p.setSourceDir(f.sourceDir().trim());
+        // Thư mục nguồn Omni là tùy chọn: có thể nạp từng file Excel bằng "Thêm Excel ảnh" / "Thêm Excel video"
+        p.setSourceDir(f.sourceDir() == null ? "" : f.sourceDir().trim());
         p.setImageDir(f.imageDir().trim());
         p.setVideoDir(f.videoDir().trim());
         if (f.runMode() != null) p.setRunMode(f.runMode());
@@ -176,6 +209,15 @@ public class ProjectService {
         if (f.maxParallel() != null) p.setMaxParallel(Math.max(1, f.maxParallel()));
         if (f.maxAttempts() != null) p.setMaxAttempts(Math.max(1, f.maxAttempts()));
         if (f.waitAllImages() != null) p.setWaitAllImages(f.waitAllImages());
+        if (f.skipMissingRefs() != null) p.setSkipMissingRefs(f.skipMissingRefs());
+        p.setVideoDuration(f.videoDuration() == null || f.videoDuration() <= 0 ? null : f.videoDuration());
+        if (f.videoQuality() != null) {
+            String q = f.videoQuality().trim().toLowerCase(Locale.ROOT);
+            if (!List.of("480p", "720p", "1080p").contains(q)) {
+                throw new IllegalArgumentException("Chất lượng video phải là 480p, 720p hoặc 1080p");
+            }
+            p.setVideoQuality(q);
+        }
     }
 
     private ProjectView view(ProjectEntity p) {
@@ -190,14 +232,16 @@ public class ProjectService {
         }
         List<JobEntity> imageJobs = jobs.findByProjectId(p.getId()).stream()
                 .filter(j -> j.getKind() == com.aifilm.automation.prompt.PromptKind.IMAGE).toList();
-        long imagesDone = imageJobs.stream().filter(j -> j.getStatus() == JobStatus.SUCCESS).count();
+        // ảnh đã hủy (thường vì đã có ảnh có sẵn) không chặn giai đoạn video
+        long imagesDone = imageJobs.stream().filter(j -> j.getStatus() == JobStatus.SUCCESS || j.getStatus() == JobStatus.CANCELLED).count();
         long ready = accounts.findAll().stream()
                 .filter(a -> a.getProvider() == p.getProvider())
                 .filter(a -> a.getStatus() == AccountStatus.READY || a.getStatus() == AccountStatus.LEASED
                         || (a.getStatus() == AccountStatus.COOLDOWN && a.getCooldownUntil() != null
                             && a.getCooldownUntil().isBefore(java.time.LocalDateTime.now())))
                 .count();
-        return new ProjectView(p, counts, total, imageJobs.size(), imagesDone, ready);
+        return new ProjectView(p, counts, total, imageJobs.size(), imagesDone, ready,
+                assets.findByProjectId(p.getId()).size(), importer.missingRefs(p.getId()));
     }
 
     private static void require(String v, String label) {

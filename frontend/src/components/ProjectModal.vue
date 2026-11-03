@@ -16,9 +16,9 @@
           <input v-model="form.name" required placeholder="Ví dụ: Tập 5. Hà - Cupid" class="input" />
         </div>
 
-        <FolderInput v-model="form.sourceDir" label="Thư mục kết quả của Omni-Flash-Pipeline *"
+        <FolderInput v-model="form.sourceDir" label="Thư mục kết quả của Omni-Flash-Pipeline (tùy chọn)"
           placeholder="Chọn thư mục output/<tên phim>/…"
-          hint="Thư mục có sẵn reference-prompts.xlsx và all-video-prompts.xlsx." />
+          hint="Có thì app tự nạp các file Excel quen thuộc trong đó. Không có thì dùng nút &quot;Thêm Excel ảnh / video&quot; ở trang Phim." />
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <FolderInput v-model="form.imageDir" label="Folder Ảnh *" hint="Ảnh đã duyệt, tên = ID (CHAR-DOMINIC-1.png)." />
@@ -38,6 +38,18 @@
         </div>
 
         <label class="flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition"
+          :class="form.skipMissingRefs ? 'border-emerald-200 bg-emerald-50/50' : 'border-slate-200'">
+          <input type="checkbox" v-model="form.skipMissingRefs" class="mt-0.5 w-4 h-4 accent-emerald-600" />
+          <span>
+            <span class="block text-sm font-medium text-slate-700">Có ảnh sẵn thì tạo video luôn, không tạo thêm ảnh</span>
+            <span class="block text-[11px] text-slate-500 mt-0.5">
+              Bật: chỉ tạo video, dùng ảnh nhân vật / bối cảnh / đồ vật có sẵn; ảnh panel chưa có thì bỏ qua.
+              Tắt: tạo ảnh panel trước (giữ bố cục đúng kịch bản), duyệt xong mới tạo video.
+            </span>
+          </span>
+        </label>
+
+        <label v-if="!form.skipMissingRefs" class="flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition"
           :class="form.waitAllImages ? 'border-indigo-200 bg-indigo-50/50' : 'border-slate-200'">
           <input type="checkbox" v-model="form.waitAllImages" class="mt-0.5 w-4 h-4 accent-indigo-600" />
           <span>
@@ -62,7 +74,7 @@
           <div class="grid grid-cols-3 gap-3">
             <div>
               <label class="label">Song song</label>
-              <input v-model.number="form.maxParallel" type="number" min="1" max="20" :disabled="form.runMode === 'FOREGROUND'" class="input" />
+              <input v-model.number="form.maxParallel" type="number" min="1" max="20" class="input" title="Số cảnh chạy cùng lúc; tối đa bằng số tài khoản sẵn sàng (mỗi tài khoản một cửa sổ)" />
             </div>
             <div>
               <label class="label">Số lần thử</label>
@@ -77,9 +89,28 @@
           </div>
         </div>
 
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="label">Độ dài video</label>
+            <select v-model="form.videoDuration" class="input">
+              <option :value="null">Mặc định (theo prompt / nền tảng)</option>
+              <option v-for="s in [4, 5, 6, 8, 10]" :key="s" :value="s">{{ s }} giây</option>
+            </select>
+          </div>
+          <div>
+            <label class="label">Chất lượng tải video về</label>
+            <select v-model="form.videoQuality" class="input">
+              <option value="480p">480p</option>
+              <option value="720p">720p</option>
+              <option value="1080p">1080p</option>
+            </select>
+          </div>
+          <p class="hint col-span-2 -mt-2">Prompt Omni đã ghi sẵn thời lượng mỗi cảnh ("Requested duration: 10 seconds"); chỉ đổi độ dài khi nền tảng cần chọn riêng.</p>
+        </div>
+
         <div v-if="form.provider === 'FLOW_BROWSER'">
           <label class="label">Link dự án trên Flow (tùy chọn)</label>
-          <input v-model="form.flowProjectUrl" placeholder="https://labs.google/fx/tools/flow/project/..." class="input font-mono !text-[13px]" />
+          <input v-model="form.flowProjectUrl" placeholder="https://flow.google.com/project/..." class="input font-mono !text-[13px]" />
         </div>
       </div>
 
@@ -109,6 +140,7 @@ const modes = [
 const blank = () => ({
   name: '', sourceDir: '', imageDir: '', videoDir: '', runMode: 'BACKGROUND', provider: 'FLOW_BROWSER',
   flowProjectUrl: '', aspectRatio: '16:9', maxParallel: 3, maxAttempts: 3, waitAllImages: true,
+  videoDuration: null, videoQuality: '720p', skipMissingRefs: true,
 })
 const form = ref(blank())
 const saving = ref(false)
@@ -116,7 +148,9 @@ const saving = ref(false)
 watch(() => [props.show, props.project], () => {
   if (!props.show) return
   form.value = props.project
-    ? { ...blank(), ...props.project, flowProjectUrl: props.project.flowProjectUrl || '', waitAllImages: props.project.waitAllImages !== false }
+    ? { ...blank(), ...props.project, flowProjectUrl: props.project.flowProjectUrl || '', waitAllImages: props.project.waitAllImages !== false,
+        videoDuration: props.project.videoDuration ?? null, videoQuality: props.project.videoQuality || '720p',
+        skipMissingRefs: !!props.project.skipMissingRefs }
     : blank()
 }, { immediate: true })
 

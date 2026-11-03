@@ -49,13 +49,23 @@ public class JobClaimService {
             if (jobs.countByProjectIdAndStatus(p.getId(), JobStatus.GENERATING) >= p.effectiveParallel()) {
                 continue;
             }
-            boolean imagesOnly = p.isWaitAllImagesOn() && jobs.countByProjectIdAndKindAndStatusNotIn(
+            boolean imagesOnly = !p.isSkipMissingRefsOn() && p.isWaitAllImagesOn() && jobs.countByProjectIdAndKindAndStatusNotIn(
                     p.getId(), PromptKind.IMAGE, List.of(JobStatus.SUCCESS, JobStatus.CANCELLED)) > 0;
-            Optional<JobEntity> next = jobs.findNextRunnable(p.getId(), imagesOnly ? 1 : 0);
+            Optional<JobEntity> next = jobs.findNextRunnable(p.getId(), imagesOnly ? 1 : 0, p.isSelectedOnlyOn() ? 1 : 0, p.isSkipMissingRefsOn() ? 1 : 0);
             if (next.isEmpty()) {
+                if (p.isSelectedOnlyOn() && jobs.countSelectedLeft(p.getId()) == 0) {
+                    p.setSelectedOnly(false);
+                    p.pause("Đã chạy xong các cảnh bạn chọn");
+                    log.info("Phim {}: xong các cảnh đã chọn, tạm dừng", p.getCode());
+                }
                 continue;
             }
-            Optional<AccountEntity> acc = accounts.findNextAvailable(p.getProvider().name(), now);
+            JobEntity candidate = next.get();
+            Optional<AccountEntity> acc = candidate.getEditInstruction() != null && candidate.getFlowAccountId() != null
+                    // "Sửa trên Flow": video nằm trong dự án Flow của đúng tài khoản đã tạo nó
+                    ? accounts.findById(candidate.getFlowAccountId()).filter(a -> a.getStatus() == com.aifilm.automation.account.AccountStatus.READY
+                        || (a.getStatus() == com.aifilm.automation.account.AccountStatus.COOLDOWN && a.getCooldownUntil() != null && !a.getCooldownUntil().isAfter(now)))
+                    : accounts.findNextAvailable(p.getProvider().name(), now);
             if (acc.isEmpty()) {
                 continue;   // job giữ PENDING; UI hiển thị "hết tài khoản"
             }

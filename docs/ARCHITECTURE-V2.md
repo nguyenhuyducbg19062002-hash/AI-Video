@@ -1223,7 +1223,7 @@ from playwright.sync_api import expect, sync_playwright
 
 from .errors import AuthRequired, Cancelled, ConfigError, GenerationResult, QuotaExceeded, Rejected, TransientError
 
-FLOW_URL = "https://labs.google/fx/tools/flow"   # kiểm lại địa chỉ hiện hành của Flow
+FLOW_URL = "https://flow.google.com/"   # kiểm lại địa chỉ hiện hành của Flow
 
 
 def parse_proxy(p: str | None):
@@ -1370,7 +1370,7 @@ class FlowBrowserDriver:
 Mình **không có** selector đúng của Google Flow; mọi giá trị dưới đây là chỗ trống. Hãy ghi lại bằng lệnh:
 
 ```
-python -m playwright codegen --channel msedge https://labs.google/fx/tools/flow
+python -m playwright codegen --channel msedge https://flow.google.com/
 ```
 
 Nên ưu tiên selector theo vai trò/nhãn (`role=button[name="..."]`, `[aria-label=...]`) thay vì class CSS sinh tự động. Worker sẽ báo `CONFIG_ERROR` và dừng project nếu còn chữ `TODO`.

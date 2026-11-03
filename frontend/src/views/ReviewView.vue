@@ -51,9 +51,9 @@
               controls autoplay loop class="w-full max-h-[60vh]"></video>
             <img v-else :key="'i' + current.id + current.generatedAt" :src="jobsApi.previewUrl(current)" class="max-w-full max-h-[60vh] object-contain" />
           </div>
-          <div v-if="current.referenceIds.length" class="flex flex-wrap items-center gap-1.5 text-xs">
-            <span class="text-slate-500">Ảnh reference:</span>
-            <span v-for="r in current.referenceIds" :key="r" class="px-2 py-0.5 rounded-md bg-slate-100 font-mono text-slate-600">{{ r }}</span>
+          <div v-if="current.references.length">
+            <div class="section-label mb-1.5">Ảnh reference đã dùng · so sánh với kết quả ở trên</div>
+            <RefStrip :job="current" :project-id="store.projectId" :editable="false" :size="96" />
           </div>
           <p v-if="current.summaryVi" class="note-info !text-sm !text-slate-700">{{ current.summaryVi }}</p>
         </div>
@@ -70,7 +70,20 @@
         </div>
         <div class="p-4 flex-1 flex flex-col gap-2">
           <textarea v-model="draft" rows="16" class="input flex-1 font-mono !text-xs leading-relaxed resize-none"></textarea>
-          <input v-model="note" placeholder="Ghi chú lý do tạo lại (tùy chọn)" class="input !text-xs" />
+          <input v-model="note" placeholder="Cần đổi gì? Ví dụ: thêm chút căng thẳng (được gửi kèm prompt khi Tạo lại)" class="input !text-xs" />
+
+          <!-- Sửa trên Flow: chỉnh chính video này, không tạo lại từ đầu -->
+          <div v-if="current.kind === 'VIDEO'" class="rounded-xl border border-violet-200 bg-violet-50/60 p-3 space-y-2">
+            <div class="text-sm font-semibold text-violet-800 flex items-center gap-1.5"><Wand2 class="w-4 h-4" /> Sửa trên Flow</div>
+            <template v-if="current.flowEditable">
+              <textarea v-model="editText" rows="3" class="input !text-xs" placeholder="Cần Flow sửa gì? Ví dụ: cho Caleb cười nhiều hơn, bỏ người đi đường phía sau, giữ nguyên phần còn lại"></textarea>
+              <button :disabled="busy || !editText.trim()" @click="flowEdit" class="btn w-full !py-2 !bg-violet-600 !text-white !border-violet-600 hover:!bg-violet-700 disabled:!bg-violet-300 disabled:!border-violet-300">
+                <Wand2 class="w-4 h-4" /> Gửi Flow sửa video này
+              </button>
+              <p class="text-[11px] text-violet-700">Flow sửa chính video này (đúng tài khoản đã tạo), bản mới về lại đây để duyệt. Chỉ chạy cảnh này.</p>
+            </template>
+            <p v-else class="text-[11px] text-slate-500">Video này không có địa chỉ trên Flow (đưa vào tay hoặc tạo bằng bản cũ của app): dùng "Tạo lại".</p>
+          </div>
           <div class="grid grid-cols-2 gap-2 pt-1">
             <button :disabled="busy" @click="approve" class="btn-success !py-2.5"><Check class="w-4 h-4" /> Duyệt (A)</button>
             <button :disabled="busy" @click="regenerate" class="btn-warn !py-2.5">
@@ -89,14 +102,16 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { Check, CheckCircle2, ExternalLink, FileText, Image as ImageIcon, ListChecks, RotateCcw, Video } from 'lucide-vue-next'
+import { Check, CheckCircle2, ExternalLink, FileText, Image as ImageIcon, ListChecks, RotateCcw, Video, Wand2 } from 'lucide-vue-next'
 import { jobsApi, errMsg } from '@/api'
+import RefStrip from '@/components/RefStrip.vue'
 import { store } from '@/store'
 
 const items = ref([])
 const idx = ref(0)
 const draft = ref('')
 const note = ref('')
+const editText = ref('')
 const busy = ref(false)
 
 const current = computed(() => items.value[idx.value])
@@ -112,6 +127,7 @@ const targetName = computed(() => {
 watch(() => current.value?.id, () => {
   draft.value = current.value?.prompt ?? ''
   note.value = ''
+  editText.value = ''
 })
 
 async function load() {
@@ -145,6 +161,8 @@ async function act(fn, msg) {
 }
 
 const approve = () => act((j) => jobsApi.approve(j.id), `Đã duyệt và lưu ${current.value.externalId}`)
+const flowEdit = () => act((j) => jobsApi.flowEdit(j.id, editText.value),
+  `Đã gửi Flow sửa ${current.value.kind === 'VIDEO' ? 'video STT ' + current.value.externalId : current.value.externalId}; bản mới sẽ về lại màn Duyệt`)
 const regenerate = () => act((j) => jobsApi.regenerate(j.id, edited.value ? draft.value : null, note.value || null),
   `Đã đưa ${current.value.externalId} về hàng đợi để tạo lại`)
 

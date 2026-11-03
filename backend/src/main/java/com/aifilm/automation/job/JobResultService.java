@@ -5,6 +5,8 @@ import com.aifilm.automation.account.AccountRepository;
 import com.aifilm.automation.account.AccountStatus;
 import com.aifilm.automation.job.WorkerReports.FailureReport;
 import com.aifilm.automation.job.WorkerReports.GeneratedReport;
+import com.aifilm.automation.project.FlowLinkEntity;
+import com.aifilm.automation.project.FlowLinkRepository;
 import com.aifilm.automation.project.ProjectEntity;
 import com.aifilm.automation.project.ProjectRepository;
 import com.aifilm.automation.service.AppSettingsService;
@@ -32,13 +34,15 @@ public class JobResultService {
     private final ProjectRepository projects;
     private final JobTransitions transitions;
     private final AppSettingsService settings;
+    private final FlowLinkRepository flowLinks;
 
     @Transactional
     public void onGenerated(long jobId, GeneratedReport r) {
         JobEntity job = owned(jobId, r.workerId());
         Path staged = StagingGuard.requireInside(Path.of(r.stagedFile()));
         // File tải về rỗng / tải dở / không phải ảnh-video: không đưa người duyệt, tự tạo lại như một lỗi tạm thời
-        var broken = MediaCheck.problem(staged);
+        var broken = MediaCheck.problem(staged)
+                .or(() -> MediaCheck.wrongKind(staged, job.getKind() == com.aifilm.automation.prompt.PromptKind.VIDEO));
         if (broken.isPresent()) {
             log.warn("Job {}: file tải về bị hỏng ({}), tạo lại", jobId, broken.get());
             onFailed(jobId, new FailureReport(r.workerId(), ErrorCode.TRANSIENT.name(), "File tải về bị hỏng: " + broken.get()));
@@ -46,7 +50,14 @@ public class JobResultService {
         }
         job.setPreviewPath(staged.toString());
         job.setRemoteRef(r.remoteRef());
+        if (r.mediaUrl() != null && r.mediaUrl().contains("/edit/")) {
+            job.setFlowMediaUrl(r.mediaUrl());
+            job.setFlowAccountId(job.getAccountId());
+        }
+        job.setEditInstruction(null);
+        rememberFlowProject(job, r.remoteRef());
         job.setGeneratedAt(LocalDateTime.now());
+        job.setRunPriority(null);   // cảnh đã chọn: xong lượt chạy
         job.setErrorCode(null);
         job.setErrorMessage(null);
         job.setWorkerId(null);
@@ -91,9 +102,26 @@ public class JobResultService {
                 requeue(job, acc, "lỗi cấu hình worker");
                 projects.findById(job.getProjectId()).ifPresent(p -> p.pause("CONFIG_ERROR: " + r.message()));
             }
+            case PAUSED -> {
+                // người dùng chủ động dừng (đóng cửa sổ Flow / nút "Tạm dừng phim"): không phải lỗi
+                acc.releaseOk();
+                job.setErrorCode(null);
+                job.setErrorMessage(null);
+                requeue(job, acc, "người dùng tạm dừng: " + r.message());
+                projects.findById(job.getProjectId()).ifPresent(p -> p.pause(r.message()
+                        + ". Chọn cảnh ở trang Danh sách cảnh (nút \"Chạy cảnh này\") hoặc bấm Chạy để làm tiếp."));
+            }
+            case ACCOUNT_BROKEN -> {
+                // Lỗi của riêng tài khoản (proxy…): thử lại trên chính tài khoản này vô ích. Tắt nó, không tính lượt thử của job.
+                acc.setLeasedJobId(null);
+                acc.setStatus(com.aifilm.automation.account.AccountStatus.DISABLED);
+                acc.setLastErrorMessage(r.message() + " → sửa tài khoản rồi bấm \"Bật lại\"");
+                requeue(job, acc, "tài khoản " + acc.getEmail() + " lỗi cấu hình (" + r.message() + ") → tắt tài khoản, xoay sang tài khoản khác");
+            }
             case CANCELLED -> {
                 acc.releaseOk();
                 job.setWorkerId(null);
+                job.setRunPriority(null);
                 transitions.move(job, JobStatus.CANCELLED, acc.getId(), "người dùng hủy");
             }
         }
@@ -134,6 +162,11 @@ public class JobResultService {
             transitions.move(job, JobStatus.APPROVED, null, "khôi phục sau khi khởi động lại");
         }
         accounts.findByStatus(AccountStatus.LEASED).forEach(AccountEntity::releaseOk);
+        // Mở app không tự chạy gì: phim đang chạy lúc tắt app thì về "Tạm dừng", người dùng bấm Chạy mới chạy
+        for (ProjectEntity p : projects.findByStatusOrderByIdAsc(com.aifilm.automation.project.ProjectStatus.RUNNING)) {
+            p.pause("Vừa mở app: phim đang tạm dừng. Bấm \"Chạy\" (hoặc \"Chạy riêng\" ở một cảnh) để làm tiếp");
+            log.info("Phim {}: tạm dừng khi mở app", p.getCode());
+        }
     }
 
     private void requeue(JobEntity job, AccountEntity acc, String why) {
@@ -144,7 +177,32 @@ public class JobResultService {
 
     private void fail(JobEntity job, AccountEntity acc, String why) {
         job.setWorkerId(null);
+        job.setRunPriority(null);
         transitions.move(job, JobStatus.FAILED, acc.getId(), why);
+    }
+
+    /** Worker vừa vào / tạo một dự án Flow cho cảnh đang chạy: nhớ ngay (kể cả khi người dùng đóng cửa sổ sau đó). */
+    @Transactional
+    public void onFlowProject(long jobId, String workerId, String url) {
+        rememberFlowProject(owned(jobId, workerId), url);
+    }
+
+    /** Nhớ dự án Flow theo cặp (phim, tài khoản): dự án Flow chỉ tài khoản tạo ra nó mới mở được. */
+    private void rememberFlowProject(JobEntity job, String url) {
+        if (!FlowLinkRepository.isProjectUrl(url) || job.getAccountId() == null) {
+            return;
+        }
+        // Flow mở /project/<uuid>/edit/<media> sau khi tạo video: chỉ nhớ phần /project/<uuid>
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("^(https://flow\\.google\\.com/project/[0-9a-fA-F-]{36})")
+                .matcher(url.split("[?#]")[0]);
+        String clean = m.find() ? m.group(1) : url.split("[?#]")[0];
+        FlowLinkEntity link = flowLinks.findByProjectIdAndAccountId(job.getProjectId(), job.getAccountId())
+                .orElseGet(() -> new FlowLinkEntity(job.getProjectId(), job.getAccountId(), clean));
+        if (link.getId() == null || !clean.equals(link.getUrl())) {
+            link.setUrl(clean);
+            flowLinks.save(link);
+            log.info("Phim {} / tài khoản {}: dùng dự án Flow {}", job.getProjectId(), job.getAccountId(), clean);
+        }
     }
 
     private JobEntity owned(long jobId, String workerId) {

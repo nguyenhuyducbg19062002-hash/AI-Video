@@ -114,6 +114,7 @@
 
         <div class="flex-1 min-h-0 overflow-y-auto pr-1 -mr-1">
           <ProjectsView v-if="store.view === 'projects'" />
+          <ScenesView v-else-if="store.view === 'scenes'" />
           <ReviewView v-else-if="store.view === 'review'" />
           <AccountsView v-else-if="store.view === 'accounts'" />
           <SettingsView v-else-if="store.view === 'settings'" />
@@ -138,8 +139,9 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { ArrowRight, CheckCircle2, Clapperboard, Cpu, Film, Power, Settings, User, Users } from 'lucide-vue-next'
+import { ArrowRight, CheckCircle2, Clapperboard, Cpu, Film, LayoutList, Power, Settings, User, Users } from 'lucide-vue-next'
 import ProjectsView from './views/ProjectsView.vue'
+import ScenesView from './views/ScenesView.vue'
 import ReviewView from './views/ReviewView.vue'
 import AccountsView from './views/AccountsView.vue'
 import SettingsView from './views/SettingsView.vue'
@@ -149,6 +151,7 @@ import { store } from './store'
 const tabs = [
   { key: 'accounts', label: 'Tài khoản', icon: User },
   { key: 'projects', label: 'Phim & hàng đợi', icon: Film },
+  { key: 'scenes', label: 'Danh sách cảnh', icon: LayoutList },
   { key: 'review', label: 'Duyệt kết quả', icon: CheckCircle2 },
   { key: 'settings', label: 'Cài đặt', icon: Settings },
 ]
@@ -156,7 +159,8 @@ const tabs = [
 const steps = ['Tài khoản', 'Phim', 'Duyệt']
 const BANNERS = {
   accounts: { label: 'Tài khoản', title: 'Tài khoản xoay vòng', step: 0, desc: 'Đăng nhập Google Flow một lần cho mỗi tài khoản; hết quota sẽ tự chuyển tài khoản.' },
-  projects: { label: 'Phim', title: 'Phim & hàng đợi', step: 1, desc: 'Nạp prompt từ Omni-Flash-Pipeline, chạy ảnh trước rồi tới video.' },
+  projects: { label: 'Phim', title: 'Phim & hàng đợi', step: 1, desc: 'Thêm Excel ảnh / video của Omni và ảnh có sẵn; chạy ảnh trước rồi tới video.' },
+  scenes: { label: 'Phim', title: 'Danh sách cảnh', step: 1, desc: 'Từng cảnh theo thứ tự file: mô tả, prompt, ảnh reference (+ thêm ảnh), so sánh kết quả.' },
   review: { label: 'Duyệt', title: 'Duyệt kết quả', step: 2, desc: 'Xem trước từng ảnh/video; duyệt để lưu đúng tên ID, hoặc sửa prompt và tạo lại.' },
   settings: { label: 'Hệ thống', title: 'Cài đặt', step: -1, desc: 'Số worker, thời gian chờ render, thời gian nghỉ khi hết quota.' },
 }
@@ -174,7 +178,8 @@ const queue = computed(() => {
     { label: 'Đang tạo', value: c.GENERATING ?? 0, cls: 'text-sky-600' },
     { label: 'Chờ duyệt', value: c.AWAITING_REVIEW ?? 0, cls: 'text-amber-600' },
     { label: 'Xong', value: c.SUCCESS ?? 0, cls: 'text-emerald-600' },
-    { label: 'Lỗi', value: (c.FAILED ?? 0) + (c.CANCELLED ?? 0), cls: 'text-rose-600' },
+    { label: 'Có sẵn / đã hủy', value: c.CANCELLED ?? 0, cls: 'text-slate-500' },
+    { label: 'Lỗi', value: c.FAILED ?? 0, cls: 'text-rose-600' },
   ]
 })
 

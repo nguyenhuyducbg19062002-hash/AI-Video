@@ -112,6 +112,13 @@ def report(path: str, body: dict):
     log.error("Không báo được kết quả (%s); backend sẽ thu hồi job sau khi mất heartbeat", path)
 
 
+def _report_project(job_id: int, url: str):
+    try:
+        call(f"/jobs/{job_id}/flow-project", {"workerId": WORKER_ID, "url": url})
+    except requests.RequestException as e:
+        log.warning("Không báo được link dự án Flow: %s", e)
+
+
 def run_job(job: dict):
     job_id = job["jobId"]
     log.info("Job %s: %s %s trên %s (%s, %s)", job_id, job["kind"], job["externalId"],
@@ -119,12 +126,15 @@ def run_job(job: dict):
     with Heartbeat(job_id) as hb:
         try:
             driver = driver_for(job["provider"])
+            # driver Flow gọi khi vừa vào / tạo dự án Flow: backend nhớ link theo (phim, tài khoản) ngay lúc đó
+            job["_on_project"] = lambda url: _report_project(job_id, url)
             if job["runMode"] == "FOREGROUND":
                 result = driver.generate_foreground(job, should_stop=hb.cancelled.is_set)
             else:
                 result = driver.generate(job, should_stop=hb.cancelled.is_set)
             log.info("Job %s xong: %s", job_id, result.staged_file)
-            report(f"/jobs/{job_id}/generated", {"stagedFile": str(result.staged_file), "remoteRef": result.remote_ref})
+            report(f"/jobs/{job_id}/generated", {"stagedFile": str(result.staged_file), "remoteRef": result.remote_ref,
+                                                 "mediaUrl": getattr(result, "media_url", None)})
         except WorkerError as e:
             log.warning("Job %s: %s %s", job_id, e.code, e)
             report(f"/jobs/{job_id}/failed", {"errorCode": e.code, "message": str(e)[:1900]})

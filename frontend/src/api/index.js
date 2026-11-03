@@ -20,16 +20,54 @@ export const projectsApi = {
   pause: (id) => data(http.post(`/projects/${id}/pause`)),
   retryFailed: (id) => data(http.post(`/projects/${id}/retry-failed`)),
   verifyFiles: (id) => data(http.post(`/projects/${id}/verify-files`)),
+  /** kind = 'IMAGE' ("Thêm Excel ảnh") hoặc 'VIDEO' ("Thêm Excel video") */
+  importFile: (id, kind, file) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return data(http.post(`/projects/${id}/import-file`, fd, { params: { kind } }))
+  },
+  importAssetFolder: (id, path) => data(http.post(`/projects/${id}/assets/import-folder`, { path })),
+  /** "Nạp cả thư mục phim": mọi file prompt (.xlsx/.txt) + ảnh có sẵn bên trong */
+  importMovieFolder: (id, path) => data(http.post(`/projects/${id}/import-folder`, { path })),
+  /** "Nhập thủ công": mỗi dòng một prompt */
+  importText: (id, kind, text) => data(http.post(`/projects/${id}/import-text`, { kind, text })),
+  /** "Ảnh → Video theo thư mục con" */
+  importImageGroups: (id, path, grouped) => data(http.post(`/projects/${id}/import-image-groups`, { path, grouped })),
+  assets: (id) => data(http.get(`/projects/${id}/assets`)),
+  /** Chạy các cảnh đã chọn (theo thứ tự). only = chỉ chạy các cảnh này rồi phim tự tạm dừng. */
+  runSelected: (id, jobIds, only, append = false) => data(http.post(`/projects/${id}/run-selected`, { jobIds, only, append })),
+  assetUrl: (projectId, refId) => `/api/projects/${projectId}/assets/${encodeURIComponent(refId)}/file`,
+}
+
+export const promptsApi = {
+  /** Nút "+": thêm một hoặc nhiều ảnh vào cuối danh sách ảnh reference của một cảnh */
+  addReferences: (promptId, files) => {
+    const fd = new FormData()
+    for (const f of files) fd.append('files', f)
+    return data(http.post(`/prompts/${promptId}/references`, fd))
+  },
+  removeReference: (promptId, refId) => data(http.delete(`/prompts/${promptId}/references/${encodeURIComponent(refId)}`)),
 }
 
 export const jobsApi = {
-  list: (projectId, status) => data(http.get(`/projects/${projectId}/jobs`, { params: status ? { status } : {} })),
+  /** full=false: không kèm nội dung prompt (danh sách dài); lấy prompt của một cảnh bằng get(id) */
+  list: (projectId, status, full = true) => data(http.get(`/projects/${projectId}/jobs`, { params: { ...(status ? { status } : {}), full } })),
   get: (id) => data(http.get(`/jobs/${id}`)),
   history: (id) => data(http.get(`/jobs/${id}/history`)),
   approve: (id) => data(http.post(`/jobs/${id}/approve`)),
   approveBatch: (ids) => data(http.post('/jobs/approve-batch', ids)),
   regenerate: (id, promptText, note) => data(http.post(`/jobs/${id}/regenerate`, { promptText, note })),
   cancel: (id) => data(http.post(`/jobs/${id}/cancel`)),
+  /** "Chạy cảnh này": đưa cảnh lên đầu hàng đợi và cho phim chạy */
+  runNow: (id) => data(http.post(`/jobs/${id}/run-now`)),
+  /** "Sửa trên Flow": gửi yêu cầu sửa cho chính video cũ trên Flow (không tạo lại từ đầu) */
+  flowEdit: (id, instruction) => data(http.post(`/jobs/${id}/flow-edit`, { instruction })),
+  /** "Đưa file đã tải về vào app": file ảnh / video người dùng tự tải từ Flow → lưu vào folder, đánh dấu xong */
+  manualResult: (id, file) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return data(http.post(`/jobs/${id}/manual-result`, fd, { timeout: 600000 }))
+  },
   previewUrl: (job) => `/api/jobs/${job.id}/preview?v=${encodeURIComponent(job.generatedAt || '')}`,
 }
 

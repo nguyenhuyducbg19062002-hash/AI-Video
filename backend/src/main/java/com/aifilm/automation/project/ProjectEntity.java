@@ -59,6 +59,29 @@ public class ProjectEntity {
      */
     private Boolean waitAllImages = Boolean.TRUE;
 
+    /**
+     * true: "Video dùng ảnh có sẵn, không tạo thêm ảnh": app KHÔNG tự tạo ảnh (panel…) nữa, trừ ảnh người dùng
+     * bấm chạy riêng; video chạy ngay với những ảnh reference đã có trong kho, ảnh còn thiếu thì bỏ qua.
+     */
+    private Boolean skipMissingRefs;
+
+    public boolean isSkipMissingRefsOn() {
+        return Boolean.TRUE.equals(skipMissingRefs);
+    }
+
+    /** true: chỉ chạy các cảnh người dùng chọn (run_priority > 0); chạy hết thì phim tự tạm dừng. */
+    private Boolean selectedOnly;
+
+    public boolean isSelectedOnlyOn() {
+        return Boolean.TRUE.equals(selectedOnly);
+    }
+
+    /** Độ dài video (giây) chọn trên nền tảng trước khi tạo; null = theo prompt / mặc định của nền tảng. */
+    private Integer videoDuration;
+
+    /** Chất lượng khi tải video về: 480p | 720p | 1080p. null = 720p. */
+    private String videoQuality;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private ProjectStatus status = ProjectStatus.DRAFT;
@@ -89,6 +112,7 @@ public class ProjectEntity {
     }
 
     public int effectiveParallel() {
-        return runMode == RunMode.FOREGROUND ? 1 : Math.max(1, maxParallel);
+        // mỗi tài khoản một cửa sổ / một cảnh cùng lúc (tài khoản được "thuê" riêng), nên chế độ Mở Flow cũng chạy song song
+        return Math.max(1, maxParallel);
     }
 }

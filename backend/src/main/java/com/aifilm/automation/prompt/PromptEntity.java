@@ -29,10 +29,14 @@ public class PromptEntity {
     @Column(nullable = false, length = 100)
     private String externalId;
 
-    /** Cột STT trong xlsx. */
+    /** Thứ tự trong file Excel (cột STT, hoặc số dòng nếu file không có cột STT). */
     private int seqNo;
 
-    /** Cột "Tóm tắt segment (tiếng Việt)" (chỉ có ở video). */
+    /** Tên file Excel đã nạp prompt này, và thứ tự của file đó trong phim (file nạp trước đứng trước). */
+    private String sourceName;
+    private Integer sourceOrder;
+
+    /** Mô tả cảnh tiếng Việt: cột "Ghi chú" hoặc "Tóm tắt segment (tiếng Việt)". */
     @Column(columnDefinition = "TEXT")
     private String summaryVi;
 

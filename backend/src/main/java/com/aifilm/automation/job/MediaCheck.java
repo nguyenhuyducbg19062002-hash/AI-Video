@@ -41,6 +41,26 @@ public final class MediaCheck {
         }
     }
 
+    /** Cảnh video phải nhận video, cảnh ảnh phải nhận ảnh. */
+    public static Optional<String> wrongKind(Path p, boolean expectVideo) {
+        try (InputStream in = Files.newInputStream(p)) {
+            byte[] h = new byte[16];
+            if (in.readNBytes(h, 0, h.length) < 12) {
+                return Optional.empty();
+            }
+            boolean video = isMp4(h) || isWebm(h);
+            if (expectVideo && !video) {
+                return Optional.of("Flow trả về ẢNH cho cảnh video");
+            }
+            if (!expectVideo && video) {
+                return Optional.of("Flow trả về VIDEO cho cảnh ảnh");
+            }
+            return Optional.empty();
+        } catch (IOException e) {
+            return Optional.empty();
+        }
+    }
+
     static boolean knownFormat(byte[] h) {
         return isMp4(h) || isWebm(h) || isPng(h) || isJpeg(h) || isWebp(h);
     }
