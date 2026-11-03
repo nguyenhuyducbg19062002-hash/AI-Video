@@ -23,7 +23,8 @@ rem --- Cong cu (doi qua bien moi truong neu can) ---
 if not defined JAVA_HOME if exist "D:\Dev\Java\bin\jlink.exe" set "JAVA_HOME=D:\Dev\Java"
 if not defined JAVA_HOME ( echo [LOI] Chua dat JAVA_HOME tro toi JDK 17+ & exit /b 1 )
 if not exist "%JAVA_HOME%\bin\jpackage.exe" ( echo [LOI] %JAVA_HOME% khong phai JDK day du: thieu jpackage & exit /b 1 )
-if not defined MVN set "MVN=mvn"
+rem Maven Wrapper di kem du an: khong can cai Maven (lan dau tu tai Maven ve %USERPROFILE%\.m2)
+if not defined MVN set "MVN=%ROOT%backend\mvnw.cmd"
 if not defined ISCC set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
 rem Duong dan du an co dau (Du an) lam Maven loi ma hoa neu khong ep UTF-8
 set "MAVEN_OPTS=-Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8"

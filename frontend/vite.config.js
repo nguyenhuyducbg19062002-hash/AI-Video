@@ -13,19 +13,13 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      // 127.0.0.1 chứ không phải localhost: backend chỉ nghe IPv4 127.0.0.1, còn Node bản mới
+      // có thể phân giải localhost thành ::1 (IPv6) và báo ECONNREFUSED.
       '/api': {
-        target: 'http://localhost:8080',
+        target: 'http://127.0.0.1:8080',
         changeOrigin: true,
       },
-      '/output': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-      },
-      '/inputs': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-      }
-    }
+    },
   },
   build: {
     // Tự động đóng gói trực tiếp vào thư mục static của Backend Spring Boot

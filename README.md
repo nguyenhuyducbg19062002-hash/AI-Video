@@ -36,17 +36,33 @@ Google Flow không có API công khai, nên tool thao tác trên giao diện web
 
 Cần JDK 17+, Maven, Node.js 18+, Python 3.13 có `playwright` và `requests`.
 
-```bat
-:: Backend + worker (worker Python tự bật từ engine\ trong thư mục hiện tại)
-cd backend
-set MAVEN_OPTS=-Dfile.encoding=UTF-8
-mvn -q package -DskipTests
-cd ..
-java -jar backend\target\app.jar
+> **Đặt dự án ở đường dẫn KHÔNG DẤU** (ví dụ `D:\Dev\AI-Video`). Với đường dẫn như `D:\Dev\Dự án\...`, IntelliJ, Maven và jpackage đều báo `InvalidPathException: Illegal char <?>`.
 
-:: Frontend có hot reload (proxy /api sang :8080)
-cd frontend && npm install && npm run dev
+**1. Backend trong IntelliJ**
+- Mở thư mục gốc dự án bằng IntelliJ.
+- Chuột phải `backend/pom.xml` → **Add as Maven Project** (nếu IntelliJ chưa tự nhận).
+- File → Project Structure → SDK = JDK 17.
+- Chọn cấu hình chạy **Backend** (có sẵn trong `.run/`) → Run.
+  - Working directory = thư mục gốc, để backend tìm thấy `engine\` và bật worker Python.
+  - Dữ liệu thử nghiệm nằm ở `data\` của dự án, tách khỏi dữ liệu của bản exe.
+- Kiểm tra: http://127.0.0.1:8080/api/system/info → `"workersAlive": 3`.
+
+**2. Frontend riêng (hot reload)**
+```bat
+cd frontend
+npm install
+npm run dev
 ```
+Mở http://localhost:5173. Các lời gọi `/api` được proxy sang backend `127.0.0.1:8080`.
+
+**3. Chạy backend bằng dòng lệnh (không cần IntelliJ, không cần cài Maven)**
+```bat
+cd backend
+mvnw.cmd -q package -DskipTests
+cd ..
+java -Dafm.data.dir=data -jar backend\target\app.jar
+```
+Muốn có giao diện ở cổng 8080 thì phải `npm run build` trong `frontend\` trước khi package.
 
 Tùy chọn JVM hữu ích khi phát triển:
 
