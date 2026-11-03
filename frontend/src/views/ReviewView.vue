@@ -1,87 +1,98 @@
 <template>
   <div class="space-y-4">
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <div class="flex items-center gap-3">
-        <h2 class="text-xl font-black text-white">Duyệt kết quả</h2>
-        <select :value="store.projectId" @change="store.selectProject(Number($event.target.value))"
-          class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-sm">
-          <option v-for="pv in projects" :key="pv.project.id" :value="pv.project.id">
-            {{ pv.project.name }} ({{ pv.counts.AWAITING_REVIEW }} chờ duyệt)
-          </option>
-        </select>
-      </div>
-      <div class="flex items-center gap-2 text-xs text-slate-400">
-        <span>Phím tắt: <kbd>A</kbd> duyệt · <kbd>R</kbd> tạo lại · <kbd>←</kbd><kbd>→</kbd> chuyển mục</span>
-        <button v-if="items.length > 1" @click="approveAll" :disabled="busy"
-          class="px-3 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white font-semibold disabled:opacity-40">
-          Duyệt tất cả {{ items.length }} mục
-        </button>
+    <div v-if="!items.length" class="card flex flex-col items-center justify-center text-center py-20">
+      <CheckCircle2 class="w-10 h-10 text-indigo-300" />
+      <div class="text-base text-slate-700 mt-3">Không có mục nào chờ duyệt</div>
+      <div class="text-sm text-slate-500 mt-1">
+        {{ store.current ? `Kết quả mới của "${store.current.project.name}" sẽ tự hiện ở đây.` : 'Chọn một phim ở thanh bên trái.' }}
       </div>
     </div>
 
-    <div v-if="!items.length" class="p-10 rounded-3xl border border-dashed border-slate-700 text-center text-slate-400">
-      Không có mục nào chờ duyệt. Kết quả mới sẽ tự hiện ở đây.
-    </div>
-
-    <div v-else class="grid grid-cols-1 xl:grid-cols-[220px_1fr_420px] gap-4">
+    <div v-else class="grid grid-cols-1 2xl:grid-cols-[220px_1fr_420px] xl:grid-cols-[200px_1fr_380px] gap-4">
       <!-- Danh sách chờ duyệt -->
-      <div class="space-y-1.5 max-h-[75vh] overflow-y-auto pr-1">
-        <button v-for="(j, i) in items" :key="j.id" @click="idx = i"
-          :class="i === idx ? 'border-amber-400 bg-amber-500/10' : 'border-slate-800 bg-slate-900/60 hover:border-slate-600'"
-          class="w-full text-left px-3 py-2 rounded-xl border text-xs">
-          <div class="font-mono text-slate-100">{{ j.kind === 'IMAGE' ? 'Ảnh' : 'Video' }} {{ j.externalId }}</div>
-          <div class="text-slate-500 truncate">bản {{ j.revisionNo }} · {{ j.accountEmail }}</div>
-        </button>
-      </div>
+      <section class="card flex flex-col min-h-0">
+        <div class="card-head items-center">
+          <ListChecks class="w-5 h-5 text-indigo-500" />
+          <div class="card-title">Chờ duyệt <span class="count-pill ml-1">{{ items.length }}</span></div>
+        </div>
+        <div class="p-2 space-y-1 overflow-y-auto max-h-[62vh]">
+          <button v-for="(j, i) in items" :key="j.id" @click="idx = i"
+            :class="i === idx ? 'bg-indigo-50 border-indigo-300' : 'border-transparent hover:bg-slate-50'"
+            class="w-full text-left px-3 py-2 rounded-xl border text-xs transition">
+            <div class="flex items-center gap-1.5 font-mono text-slate-800">
+              <component :is="j.kind === 'IMAGE' ? ImageIcon : Video" class="w-3.5 h-3.5 text-slate-400" />
+              {{ j.externalId }}
+            </div>
+            <div class="text-slate-400 truncate mt-0.5">bản {{ j.revisionNo }} · {{ j.accountEmail }}</div>
+          </button>
+        </div>
+        <div class="p-3 border-t border-slate-100">
+          <button v-if="items.length > 1" @click="approveAll" :disabled="busy" class="btn-success w-full btn-sm !py-2">
+            Duyệt tất cả {{ items.length }} mục
+          </button>
+        </div>
+      </section>
 
       <!-- Xem trước -->
-      <div class="min-w-0 space-y-2">
-        <div class="rounded-2xl bg-black border border-slate-800 overflow-hidden flex items-center justify-center min-h-[300px]">
-          <video v-if="current.previewType === 'video'" :key="'v' + current.id + current.generatedAt" :src="jobsApi.previewUrl(current)"
-            controls autoplay loop class="w-full max-h-[70vh]"></video>
-          <img v-else :key="'i' + current.id + current.generatedAt" :src="jobsApi.previewUrl(current)" class="max-w-full max-h-[70vh] object-contain" />
+      <section class="card flex flex-col min-w-0">
+        <div class="card-head items-center">
+          <component :is="current.kind === 'IMAGE' ? ImageIcon : Video" class="w-5 h-5 text-indigo-500" />
+          <div class="flex-1 min-w-0">
+            <div class="card-title">{{ current.kind === 'IMAGE' ? 'Ảnh' : 'Video' }} {{ current.externalId }}</div>
+            <div class="card-sub">{{ idx + 1 }} / {{ items.length }} · bản prompt {{ current.revisionNo }} · {{ current.accountEmail }}</div>
+          </div>
+          <a v-if="current.remoteRef && current.remoteRef.startsWith('http')" :href="current.remoteRef" target="_blank" class="btn btn-sm">
+            <ExternalLink class="w-3.5 h-3.5" /> Mở trên Flow
+          </a>
         </div>
-        <div class="text-xs text-slate-400 flex flex-wrap gap-x-4 gap-y-1">
-          <span>{{ idx + 1 }} / {{ items.length }}</span>
-          <span class="font-mono text-slate-200">{{ current.kind === 'IMAGE' ? 'Ảnh' : 'Video' }} {{ current.externalId }}</span>
-          <span>bản prompt {{ current.revisionNo }}</span>
-          <span>{{ current.accountEmail }}</span>
-          <a v-if="current.remoteRef && current.remoteRef.startsWith('http')" :href="current.remoteRef" target="_blank" class="text-sky-400 underline">Mở trên Flow</a>
+        <div class="p-4 space-y-3">
+          <div class="rounded-xl bg-slate-900 overflow-hidden flex items-center justify-center min-h-[320px]">
+            <video v-if="current.previewType === 'video'" :key="'v' + current.id + current.generatedAt" :src="jobsApi.previewUrl(current)"
+              controls autoplay loop class="w-full max-h-[60vh]"></video>
+            <img v-else :key="'i' + current.id + current.generatedAt" :src="jobsApi.previewUrl(current)" class="max-w-full max-h-[60vh] object-contain" />
+          </div>
+          <div v-if="current.referenceIds.length" class="flex flex-wrap items-center gap-1.5 text-xs">
+            <span class="text-slate-500">Ảnh reference:</span>
+            <span v-for="r in current.referenceIds" :key="r" class="px-2 py-0.5 rounded-md bg-slate-100 font-mono text-slate-600">{{ r }}</span>
+          </div>
+          <p v-if="current.summaryVi" class="note-info !text-sm !text-slate-700">{{ current.summaryVi }}</p>
         </div>
-        <div v-if="current.referenceIds.length" class="text-xs text-slate-400">
-          Ảnh reference: <span class="font-mono text-slate-300">{{ current.referenceIds.join(', ') }}</span>
-        </div>
-        <p v-if="current.summaryVi" class="p-3 rounded-xl bg-slate-900 border border-slate-800 text-sm text-slate-200">{{ current.summaryVi }}</p>
-      </div>
+      </section>
 
       <!-- Prompt + thao tác -->
-      <div class="flex flex-col gap-2">
-        <label class="text-xs font-semibold text-slate-300">Prompt (sửa rồi bấm "Tạo lại" nếu chưa ưng)</label>
-        <textarea v-model="draft" rows="18" class="w-full flex-1 rounded-xl bg-slate-950 border border-slate-700 p-3 text-xs font-mono focus:border-sky-500 focus:outline-none"></textarea>
-        <input v-model="note" placeholder="Ghi chú lý do tạo lại (tùy chọn)" class="px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs" />
-        <div class="flex gap-2">
-          <button :disabled="busy" @click="approve" class="flex-1 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm disabled:opacity-40">
-            Duyệt (A)
-          </button>
-          <button :disabled="busy" @click="regenerate" class="flex-1 px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-sm disabled:opacity-40">
-            {{ edited ? 'Lưu prompt và tạo lại (R)' : 'Tạo lại (R)' }}
-          </button>
+      <section class="card flex flex-col">
+        <div class="card-head items-center">
+          <FileText class="w-5 h-5 text-indigo-500" />
+          <div class="flex-1">
+            <div class="card-title">Prompt</div>
+            <div class="card-sub">Sửa rồi bấm "Tạo lại" nếu chưa ưng</div>
+          </div>
         </div>
-        <p class="text-[11px] text-slate-500">
-          Duyệt = chép file vào {{ current.kind === 'IMAGE' ? 'Folder Ảnh' : 'Folder Video' }} với tên {{ current.externalId }}.
-          Tạo lại = đưa về hàng đợi; nếu đã sửa prompt thì lưu thành bản mới (bản cũ vẫn giữ trong lịch sử).
-        </p>
-      </div>
+        <div class="p-4 flex-1 flex flex-col gap-2">
+          <textarea v-model="draft" rows="16" class="input flex-1 font-mono !text-xs leading-relaxed resize-none"></textarea>
+          <input v-model="note" placeholder="Ghi chú lý do tạo lại (tùy chọn)" class="input !text-xs" />
+          <div class="grid grid-cols-2 gap-2 pt-1">
+            <button :disabled="busy" @click="approve" class="btn-success !py-2.5"><Check class="w-4 h-4" /> Duyệt (A)</button>
+            <button :disabled="busy" @click="regenerate" class="btn-warn !py-2.5">
+              <RotateCcw class="w-4 h-4" /> {{ edited ? 'Lưu & tạo lại (R)' : 'Tạo lại (R)' }}
+            </button>
+          </div>
+          <p class="hint">
+            Duyệt = chép file vào {{ current.kind === 'IMAGE' ? 'Folder Ảnh' : 'Folder Video' }} với tên <b class="font-mono">{{ targetName }}</b>.
+            Phím tắt: <kbd>A</kbd> duyệt · <kbd>R</kbd> tạo lại · <kbd>←</kbd><kbd>→</kbd> chuyển mục.
+          </p>
+        </div>
+      </section>
     </div>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { projectsApi, jobsApi, errMsg } from '@/api'
+import { Check, CheckCircle2, ExternalLink, FileText, Image as ImageIcon, ListChecks, RotateCcw, Video } from 'lucide-vue-next'
+import { jobsApi, errMsg } from '@/api'
 import { store } from '@/store'
 
-const projects = ref([])
 const items = ref([])
 const idx = ref(0)
 const draft = ref('')
@@ -90,18 +101,25 @@ const busy = ref(false)
 
 const current = computed(() => items.value[idx.value])
 const edited = computed(() => current.value && draft.value !== current.value.prompt)
+// Trùng quy tắc với ReviewService.finalFileName: ảnh = ID, video = mã phim + "_" + STT
+const targetName = computed(() => {
+  const j = current.value
+  if (!j) return ''
+  return j.kind === 'IMAGE' ? j.externalId : `${store.current?.project.code ?? ''}_${j.externalId}`
+})
 
-// Chỉ nạp lại prompt khi CHUYỂN mục, để lần làm mới 5 giây không ghi đè chữ đang sửa
+// Chỉ nạp lại prompt khi CHUYỂN mục, để lần làm mới định kỳ không ghi đè chữ đang sửa
 watch(() => current.value?.id, () => {
   draft.value = current.value?.prompt ?? ''
   note.value = ''
 })
 
 async function load() {
+  if (!store.projectId) {
+    items.value = []
+    return
+  }
   try {
-    projects.value = await projectsApi.list()
-    if (!store.projectId && projects.value.length) store.selectProject(projects.value[0].project.id)
-    if (!store.projectId) return
     const keepId = current.value?.id
     items.value = await jobsApi.list(store.projectId, 'AWAITING_REVIEW')
     const at = items.value.findIndex((j) => j.id === keepId)
@@ -118,6 +136,7 @@ async function act(fn, msg) {
     await fn(current.value)
     store.toast(msg, 'success')
     await load()
+    store.refresh()
   } catch (e) {
     store.toast(errMsg(e), 'error')
   } finally {
@@ -136,6 +155,7 @@ async function approveAll() {
     const r = await jobsApi.approveBatch(items.value.map((j) => j.id))
     store.toast(`Đã duyệt ${r.approved.length} mục` + (r.errors.length ? `, lỗi ${r.errors.length}: ${r.errors[0]}` : ''), r.errors.length ? 'error' : 'success')
     await load()
+    store.refresh()
   } catch (e) {
     store.toast(errMsg(e), 'error')
   } finally {
@@ -164,9 +184,3 @@ onUnmounted(() => {
   window.removeEventListener('keydown', onKey)
 })
 </script>
-
-<style scoped>
-kbd {
-  @apply px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-200 font-mono text-[10px] mx-0.5;
-}
-</style>

@@ -17,7 +17,18 @@ public final class AppPaths {
             return Path.of(exe).toAbsolutePath().getParent();
         }
         String override = System.getProperty("afm.home");
-        return override != null ? Path.of(override).toAbsolutePath() : Path.of("").toAbsolutePath();
+        if (override != null) {
+            return Path.of(override).toAbsolutePath();
+        }
+        // Chạy dev: thư mục làm việc có thể là gốc dự án hoặc backend\ (cấu hình mặc định của IntelliJ).
+        // Chọn thư mục nào có engine\worker_main.py.
+        Path cwd = Path.of("").toAbsolutePath();
+        for (Path p = cwd; p != null; p = p.getParent()) {
+            if (Files.isRegularFile(p.resolve("engine").resolve("worker_main.py"))) {
+                return p;
+            }
+        }
+        return cwd;
     }
 
     /** Dữ liệu người dùng: KHÔNG ghi vào thư mục cài đặt (có thể chỉ đọc và bị xóa khi cập nhật). */

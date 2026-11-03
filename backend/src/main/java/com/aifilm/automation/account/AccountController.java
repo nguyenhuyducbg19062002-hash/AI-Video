@@ -2,11 +2,14 @@ package com.aifilm.automation.account;
 
 import com.aifilm.automation.project.Provider;
 import com.aifilm.automation.system.AppPaths;
+import com.aifilm.automation.system.DesktopWindow;
 import lombok.RequiredArgsConstructor;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -85,10 +88,17 @@ public class AccountController {
         if (a.getStatus() == AccountStatus.LEASED) {
             throw new IllegalStateException("Tài khoản đang chạy job, chờ job xong rồi đăng nhập");
         }
+        Path edge = DesktopWindow.findEdge()
+                .orElseThrow(() -> new IllegalStateException("Không tìm thấy Microsoft Edge trên máy"));
         a.needLogin("đang đăng nhập");   // không READY ⇒ không bị giao job trong lúc profile đang mở
         Files.createDirectories(Path.of(a.getProfileDir()));
-        new ProcessBuilder("cmd", "/c", "start", "", "msedge",
-                "--user-data-dir=" + a.getProfileDir(), "--no-first-run", FLOW_URL).start();
+        // Trang đăng nhập Google điền sẵn email; đăng nhập xong tự chuyển sang Flow. Mật khẩu do người dùng tự gõ.
+        String loginUrl = "https://accounts.google.com/AccountChooser?Email="
+                + URLEncoder.encode(a.getEmail(), StandardCharsets.UTF_8)
+                + "&continue=" + URLEncoder.encode(FLOW_URL, StandardCharsets.UTF_8);
+        // Gọi thẳng msedge.exe (không qua "cmd /c start": cmd cắt URL ở ký tự &)
+        new ProcessBuilder(edge.toString(), "--user-data-dir=" + a.getProfileDir(),
+                "--no-first-run", "--no-default-browser-check", loginUrl).start();
         return a;
     }
 

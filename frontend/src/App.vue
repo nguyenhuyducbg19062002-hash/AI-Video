@@ -1,45 +1,135 @@
 <template>
-  <div class="min-h-screen bg-[#090d16] text-slate-100 flex flex-col font-sans">
-    <header class="h-16 border-b border-slate-800/80 bg-slate-950/70 backdrop-blur sticky top-0 z-40 px-6 flex items-center justify-between gap-4">
-      <div class="flex items-center gap-3">
-        <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-sky-600 via-indigo-600 to-amber-500 flex items-center justify-center font-black text-white">🎬</div>
-        <div>
-          <h1 class="text-base font-black tracking-wide text-white">AI FILM MAKER</h1>
-          <p class="text-[10px] text-sky-400 font-mono tracking-widest uppercase">Ảnh reference · Video · Duyệt</p>
+  <div class="h-full flex flex-col overflow-hidden">
+    <!-- Đầu trang: logo + tên + trạng thái -->
+    <header class="shrink-0 px-6 pt-5 pb-4 flex items-center justify-between gap-6">
+      <div class="flex items-center gap-4 min-w-0">
+        <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-500 shadow-lg shadow-indigo-300/50 flex items-center justify-center shrink-0">
+          <Clapperboard class="w-6 h-6 text-white" />
+        </div>
+        <div class="min-w-0">
+          <h1 class="text-2xl font-semibold text-slate-800 tracking-tight truncate">AI FILM MAKER</h1>
+          <p class="text-sm text-slate-500">Không gian sản xuất ảnh reference &amp; video từ kịch bản</p>
         </div>
       </div>
 
-      <nav class="flex items-center gap-1.5 bg-slate-900/80 p-1.5 rounded-2xl border border-slate-800">
-        <button v-for="t in tabs" :key="t.key" @click="store.go(t.key)"
-          :class="store.view === t.key ? 'bg-sky-600 text-white' : 'text-slate-400 hover:text-white'"
-          class="px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5">
-          {{ t.label }}
-          <span v-if="t.key === 'review' && pendingReview" class="px-1.5 rounded-full bg-amber-500 text-slate-950 text-[10px]">{{ pendingReview }}</span>
-        </button>
-      </nav>
-
-      <div class="flex items-center gap-2">
-        <span class="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs">
-          <span class="w-2 h-2 rounded-full" :class="online ? 'bg-emerald-400' : 'bg-rose-500'"></span>
-          {{ online ? `${workers} worker` : 'Mất kết nối' }}
-        </span>
-        <button @click="quit" class="px-3 py-1.5 rounded-xl border border-slate-700 hover:bg-rose-900/40 hover:border-rose-700 text-xs text-slate-300">Thoát</button>
+      <div class="card flex items-center divide-x divide-slate-200 px-1 py-2 shrink-0">
+        <div class="px-4">
+          <div class="text-[11px] text-slate-500">Trạng thái</div>
+          <div class="flex items-center gap-1.5 text-sm font-medium" :class="statusOk ? 'text-slate-700' : 'text-rose-600'">
+            <span class="w-2 h-2 rounded-full" :class="statusOk ? 'bg-emerald-500' : 'bg-rose-500'"></span>
+            {{ statusText }}
+          </div>
+        </div>
+        <div class="px-4 flex items-center gap-3">
+          <div class="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center">
+            <Users class="w-4 h-4 text-indigo-600" />
+          </div>
+          <div>
+            <div class="text-sm font-medium text-slate-700">{{ store.accounts.length }} tài khoản</div>
+            <div class="text-[11px] text-slate-500 flex items-center gap-1">
+              <span class="px-1.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">{{ store.readyAccounts }} sẵn sàng</span>
+            </div>
+          </div>
+        </div>
       </div>
     </header>
 
-    <main class="flex-1 w-full max-w-[1600px] mx-auto p-6">
-      <div v-if="stopped" class="p-10 text-center text-slate-300">Ứng dụng đã tắt. Bạn có thể đóng tab này.</div>
-      <ProjectsView v-else-if="store.view === 'projects'" />
-      <ReviewView v-else-if="store.view === 'review'" />
-      <AccountsView v-else-if="store.view === 'accounts'" />
-      <SettingsView v-else-if="store.view === 'settings'" />
-    </main>
+    <div v-if="stopped" class="flex-1 flex items-center justify-center text-slate-500">
+      Ứng dụng đã tắt. Bạn có thể đóng cửa sổ này.
+    </div>
+
+    <div v-else class="flex-1 min-h-0 flex gap-5 px-6 pb-5">
+      <!-- Thanh bên trái -->
+      <aside class="card w-[236px] shrink-0 flex flex-col p-3 gap-3 min-h-0">
+        <div>
+          <div class="section-label px-2 mb-2">Phim đang chọn</div>
+          <select :value="store.projectId ?? ''" @change="store.selectProject(Number($event.target.value))"
+            class="input !py-1.5 !text-[13px] !bg-slate-50" :disabled="!store.projects.length">
+            <option v-if="!store.projects.length" value="">Chưa có phim</option>
+            <option v-for="pv in store.projects" :key="pv.project.id" :value="pv.project.id">{{ pv.project.name }}</option>
+          </select>
+        </div>
+
+        <div>
+          <div class="section-label px-2 mb-1.5 mt-1">Sản xuất</div>
+          <nav class="space-y-1">
+            <button v-for="t in tabs" :key="t.key" @click="store.go(t.key)"
+              :class="store.view === t.key
+                ? 'bg-indigo-50 text-indigo-700 border-indigo-500'
+                : 'text-slate-600 border-transparent hover:bg-slate-50'"
+              class="w-full flex items-center gap-3 pl-3 pr-2 py-2.5 rounded-xl border-l-[3px] text-sm font-medium transition">
+              <span :class="store.view === t.key ? 'bg-white border-indigo-200 text-indigo-600' : 'border-slate-200 text-slate-500'"
+                class="w-7 h-7 rounded-lg border flex items-center justify-center">
+                <component :is="t.icon" class="w-4 h-4" />
+              </span>
+              <span class="flex-1 text-left">{{ t.label }}</span>
+              <span v-if="t.key === 'review' && store.pendingReview"
+                class="min-w-[22px] h-[22px] px-1.5 rounded-lg bg-indigo-600 text-white text-[11px] font-semibold flex items-center justify-center">
+                {{ store.pendingReview }}
+              </span>
+            </button>
+          </nav>
+        </div>
+
+        <!-- Hàng đợi của phim đang chọn -->
+        <div v-if="store.current" class="rounded-xl border border-slate-200 bg-slate-50/60 p-3 text-xs space-y-1.5">
+          <div class="text-slate-500 font-medium mb-1">Hàng đợi phim này</div>
+          <div v-for="q in queue" :key="q.label" class="flex justify-between">
+            <span class="text-slate-600">{{ q.label }}</span>
+            <span class="font-semibold" :class="q.cls">{{ q.value }}</span>
+          </div>
+        </div>
+
+        <div class="mt-auto space-y-2">
+          <div class="flex items-center gap-3 px-3 py-2 rounded-xl text-sm text-slate-600">
+            <Cpu class="w-4 h-4 text-slate-500" />
+            <span class="flex-1">Worker Python</span>
+            <span class="text-xs font-semibold" :class="workers ? 'text-emerald-600' : 'text-rose-600'">{{ workers }}</span>
+            <span class="w-2 h-2 rounded-full" :class="workers ? 'bg-emerald-500' : 'bg-rose-500'"></span>
+          </div>
+          <button @click="quit" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-600 hover:bg-rose-50 hover:border-rose-200 hover:text-rose-600 transition">
+            <Power class="w-4 h-4" />
+            <span>Thoát ứng dụng</span>
+          </button>
+        </div>
+      </aside>
+
+      <!-- Nội dung -->
+      <main class="flex-1 min-w-0 flex flex-col gap-4 min-h-0">
+        <section class="shrink-0 rounded-2xl px-6 py-4 text-white bg-gradient-to-r from-[#0e1f4d] via-[#173a6e] to-[#1d6579] shadow-md flex items-center justify-between gap-6">
+          <div>
+            <div class="text-[11px] font-semibold tracking-widest text-cyan-300 uppercase">{{ banner.label }}</div>
+            <div class="text-2xl font-semibold mt-0.5">{{ banner.title }}</div>
+          </div>
+          <div class="text-right hidden lg:block">
+            <div class="flex items-center justify-end gap-2 text-sm font-semibold">
+              <template v-for="(s, i) in steps" :key="s">
+                <ArrowRight v-if="i" class="w-3.5 h-3.5 text-cyan-300" />
+                <span :class="i === banner.step ? 'text-white' : 'text-slate-300/80'">{{ String(i + 1).padStart(2, '0') }} {{ s }}</span>
+              </template>
+            </div>
+            <div class="text-xs text-slate-300 mt-1">{{ banner.desc }}</div>
+          </div>
+        </section>
+
+        <div class="flex-1 min-h-0 overflow-y-auto pr-1 -mr-1">
+          <ProjectsView v-if="store.view === 'projects'" />
+          <ReviewView v-else-if="store.view === 'review'" />
+          <AccountsView v-else-if="store.view === 'accounts'" />
+          <SettingsView v-else-if="store.view === 'settings'" />
+        </div>
+      </main>
+    </div>
 
     <!-- Thông báo nổi -->
-    <div class="fixed bottom-4 right-4 z-[60] space-y-2 max-w-md">
+    <div class="fixed bottom-5 right-5 z-[60] space-y-2 max-w-md">
       <div v-for="t in store.toasts" :key="t.id"
-        :class="{ 'border-rose-600 bg-rose-950/95': t.kind === 'error', 'border-emerald-600 bg-emerald-950/95': t.kind === 'success', 'border-slate-600 bg-slate-900/95': t.kind === 'info' }"
-        class="px-4 py-3 rounded-xl border text-sm shadow-2xl whitespace-pre-wrap">
+        :class="{
+          'border-rose-200 bg-rose-50 text-rose-700': t.kind === 'error',
+          'border-emerald-200 bg-emerald-50 text-emerald-700': t.kind === 'success',
+          'border-slate-200 bg-white text-slate-700': t.kind === 'info',
+        }"
+        class="px-4 py-3 rounded-xl border text-sm shadow-lg whitespace-pre-wrap">
         {{ t.message }}
       </div>
     </div>
@@ -47,37 +137,46 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { ArrowRight, CheckCircle2, Clapperboard, Cpu, Film, Power, Settings, User, Users } from 'lucide-vue-next'
 import ProjectsView from './views/ProjectsView.vue'
 import ReviewView from './views/ReviewView.vue'
 import AccountsView from './views/AccountsView.vue'
 import SettingsView from './views/SettingsView.vue'
-import { projectsApi, systemApi } from './api'
+import { systemApi } from './api'
 import { store } from './store'
 
 const tabs = [
-  { key: 'projects', label: 'Phim' },
-  { key: 'review', label: 'Duyệt' },
-  { key: 'accounts', label: 'Tài khoản' },
-  { key: 'settings', label: 'Cài đặt' },
+  { key: 'accounts', label: 'Tài khoản', icon: User },
+  { key: 'projects', label: 'Phim & hàng đợi', icon: Film },
+  { key: 'review', label: 'Duyệt kết quả', icon: CheckCircle2 },
+  { key: 'settings', label: 'Cài đặt', icon: Settings },
 ]
 
-const online = ref(true)
-const workers = ref(0)
-const pendingReview = ref(0)
-const stopped = ref(false)
-
-async function poll() {
-  if (stopped.value) return
-  try {
-    const [info, projects] = await Promise.all([systemApi.info(), projectsApi.list()])
-    workers.value = info.workersAlive
-    pendingReview.value = projects.reduce((n, p) => n + (p.counts.AWAITING_REVIEW || 0), 0)
-    online.value = true
-  } catch {
-    online.value = false
-  }
+const steps = ['Tài khoản', 'Phim', 'Duyệt']
+const BANNERS = {
+  accounts: { label: 'Tài khoản', title: 'Tài khoản xoay vòng', step: 0, desc: 'Đăng nhập Google Flow một lần cho mỗi tài khoản; hết quota sẽ tự chuyển tài khoản.' },
+  projects: { label: 'Phim', title: 'Phim & hàng đợi', step: 1, desc: 'Nạp prompt từ Omni-Flash-Pipeline, chạy ảnh trước rồi tới video.' },
+  review: { label: 'Duyệt', title: 'Duyệt kết quả', step: 2, desc: 'Xem trước từng ảnh/video; duyệt để lưu đúng tên ID, hoặc sửa prompt và tạo lại.' },
+  settings: { label: 'Hệ thống', title: 'Cài đặt', step: -1, desc: 'Số worker, thời gian chờ render, thời gian nghỉ khi hết quota.' },
 }
+const banner = computed(() => BANNERS[store.view] || BANNERS.projects)
+
+const stopped = ref(false)
+const workers = computed(() => store.info?.workersAlive ?? 0)
+const statusOk = computed(() => store.online && workers.value > 0)
+const statusText = computed(() => (!store.online ? 'Mất kết nối' : workers.value ? 'Ready' : 'Không có worker'))
+
+const queue = computed(() => {
+  const c = store.current?.counts || {}
+  return [
+    { label: 'Chờ chạy', value: c.PENDING ?? 0, cls: 'text-slate-700' },
+    { label: 'Đang tạo', value: c.GENERATING ?? 0, cls: 'text-sky-600' },
+    { label: 'Chờ duyệt', value: c.AWAITING_REVIEW ?? 0, cls: 'text-amber-600' },
+    { label: 'Xong', value: c.SUCCESS ?? 0, cls: 'text-emerald-600' },
+    { label: 'Lỗi', value: (c.FAILED ?? 0) + (c.CANCELLED ?? 0), cls: 'text-rose-600' },
+  ]
+})
 
 async function quit() {
   if (!confirm('Tắt ứng dụng? Các job đang tạo sẽ dừng và chạy lại từ đầu ở lần mở sau.')) return
@@ -88,10 +187,26 @@ async function quit() {
   }
 }
 
-let timer
+// Báo cho backend biết cửa sổ còn mở; đóng cửa sổ (chế độ app desktop) thì backend tự tắt.
+function heartbeat() {
+  fetch('/api/system/ui-heartbeat', { method: 'POST' }).catch(() => {})
+}
+function onPageHide() {
+  navigator.sendBeacon?.('/api/system/ui-closed')
+}
+
+let pollTimer
+let beatTimer
 onMounted(() => {
-  poll()
-  timer = setInterval(poll, 5000)
+  store.refresh()
+  heartbeat()
+  pollTimer = setInterval(() => !stopped.value && store.refresh(), 4000)
+  beatTimer = setInterval(() => !stopped.value && heartbeat(), 3000)
+  window.addEventListener('pagehide', onPageHide)
 })
-onUnmounted(() => clearInterval(timer))
+onUnmounted(() => {
+  clearInterval(pollTimer)
+  clearInterval(beatTimer)
+  window.removeEventListener('pagehide', onPageHide)
+})
 </script>

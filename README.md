@@ -12,11 +12,13 @@ Thiết kế chi tiết (state machine, DB, luồng xoay vòng tài khoản): [d
    - Thư mục `output/<phim>/` của Omni-Flash-Pipeline.
    - Folder Ảnh và Folder Video (nơi lưu file đã duyệt).
    - Chế độ chạy: **Chạy ngầm**, hoặc **Mở Flow** (tool điền sẵn, bạn tự bấm tạo).
-4. **Import prompt** → **▶ Chạy**. Ảnh chạy trước. Video chỉ chạy khi mọi ảnh reference của nó đã được duyệt.
+4. **Import prompt** → **▶ Chạy**. Ảnh chạy trước. Mặc định app chờ **duyệt xong toàn bộ ảnh** rồi mới chuyển sang tạo video, và tự upload đúng ảnh của từng cảnh lên Flow theo thứ tự trong cột Reference IDs. Tắt công tắc "Duyệt xong hết ảnh rồi mới tạo video" trong cài đặt phim thì cảnh nào đủ ảnh sẽ chạy ngay.
 5. **Duyệt**: xem trước từng kết quả.
-   - `A` = duyệt: file được chép vào folder, tên đúng ID (`CHAR-DOMINIC-1.png`, `042.mp4`).
+   - `A` = duyệt: file được chép vào folder. Ảnh mang tên đúng ID (`CHAR-DOMINIC-1.png`); video mang tên mã phim + STT (`tap-5-ha-cupid_042.mp4`).
    - `R` = tạo lại: có thể sửa prompt trước khi tạo lại.
-6. **Thoát** ở góc phải trên để tắt hẳn ứng dụng (app chạy ngầm, không có cửa sổ riêng).
+   - File tải về bị rỗng hoặc hỏng thì app tự tạo lại, không đưa lên màn Duyệt.
+6. **Kiểm tra file thiếu/hỏng**: app tự quét khi bấm Chạy và mỗi 10 phút. Ảnh/video đã duyệt mà file trong folder bị mất hoặc hỏng thì app tự tạo lại đúng mục đó; nút cùng tên ở trang Phim dùng để quét ngay.
+7. Ứng dụng chạy trong **cửa sổ riêng** (không phải tab trình duyệt). Đóng cửa sổ hoặc bấm **Thoát ứng dụng** để tắt hẳn.
 
 Dữ liệu (DB, profile tài khoản, file chờ duyệt, log) nằm ở `%LOCALAPPDATA%\AIFilmMaker`. Gỡ cài đặt không xóa thư mục này.
 

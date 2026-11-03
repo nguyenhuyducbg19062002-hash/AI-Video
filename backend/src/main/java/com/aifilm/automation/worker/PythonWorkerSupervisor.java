@@ -3,7 +3,7 @@ package com.aifilm.automation.worker;
 import com.aifilm.automation.AiFlowAutomationApplication;
 import com.aifilm.automation.service.AppSettingsService;
 import com.aifilm.automation.system.AppPaths;
-import com.aifilm.automation.system.Browser;
+import com.aifilm.automation.system.DesktopWindow;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -31,6 +31,7 @@ public class PythonWorkerSupervisor {
 
     private final WorkerToken token;
     private final AppSettingsService settings;
+    private final DesktopWindow desktopWindow;
     private final List<Process> workers = new ArrayList<>();
     private volatile boolean stopping;
 
@@ -46,7 +47,7 @@ public class PythonWorkerSupervisor {
             }
             log.info("Đã bật {} worker Python", n);
         }
-        Browser.open("http://127.0.0.1:" + AiFlowAutomationApplication.PORT);
+        desktopWindow.openOnStartup("http://127.0.0.1:" + AiFlowAutomationApplication.PORT);
     }
 
     @Scheduled(fixedDelay = 15_000, initialDelay = 15_000)

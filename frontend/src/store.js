@@ -1,4 +1,5 @@
 import { reactive } from 'vue'
+import { projectsApi, systemApi, accountsApi } from './api'
 
 function load(key, fallback) {
   try {
@@ -17,12 +18,41 @@ function save(key, value) {
   }
 }
 
-/** Trạng thái dùng chung giữa các màn: phim đang chọn + thông báo nổi. */
+/**
+ * Trạng thái dùng chung giữa các màn: phim đang chọn, danh sách phim, trạng thái hệ thống, thông báo nổi.
+ * App.vue gọi refresh() định kỳ; các màn gọi refresh() ngay sau khi thao tác để cập nhật tức thì.
+ */
 export const store = reactive({
   projectId: load('afm.projectId', null),
   view: load('afm.view', 'projects'),
+  projects: [],
+  accounts: [],
+  info: null,
+  online: true,
   toasts: [],
 
+  get current() {
+    return this.projects.find((p) => p.project.id === this.projectId) || null
+  },
+  get pendingReview() {
+    return this.projects.reduce((n, p) => n + (p.counts.AWAITING_REVIEW || 0), 0)
+  },
+  get readyAccounts() {
+    return this.accounts.filter((a) => a.status === 'READY' || a.status === 'LEASED').length
+  },
+
+  async refresh() {
+    try {
+      const [info, projects, accounts] = await Promise.all([systemApi.info(), projectsApi.list(), accountsApi.list()])
+      this.info = info
+      this.projects = projects
+      this.accounts = accounts
+      this.online = true
+      if (!this.current && projects.length) this.selectProject(projects[0].project.id)
+    } catch {
+      this.online = false
+    }
+  },
   selectProject(id) {
     this.projectId = id
     save('afm.projectId', id)

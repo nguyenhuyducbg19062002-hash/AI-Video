@@ -1,37 +1,40 @@
 <template>
   <div>
-    <label class="block text-xs font-medium text-slate-300 mb-1">{{ label }}</label>
+    <label v-if="label" class="label flex items-center gap-1.5">
+      <Folder class="w-3.5 h-3.5 text-slate-400" /> {{ label }}
+    </label>
     <div class="flex gap-2">
       <input
         :value="modelValue"
         @input="$emit('update:modelValue', $event.target.value)"
         type="text"
         :placeholder="placeholder"
-        class="flex-1 min-w-0 px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-slate-100 text-sm font-mono focus:border-sky-500 focus:outline-none" />
-      <button type="button" @click="pick" :disabled="picking"
-        class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold whitespace-nowrap disabled:opacity-50">
-        {{ picking ? 'Đang mở…' : 'Chọn…' }}
+        class="input flex-1 min-w-0 font-mono !text-[13px]" />
+      <button type="button" @click="pick" :disabled="picking" class="btn">
+        <FolderOpen class="w-4 h-4" />
+        {{ picking ? 'Đang mở…' : 'Chọn folder' }}
       </button>
     </div>
-    <p v-if="hint" class="text-[11px] text-slate-500 mt-1">{{ hint }}</p>
+    <p v-if="hint" class="hint">{{ hint }}</p>
   </div>
 </template>
 
 <script setup>
 import { ref } from 'vue'
+import { Folder, FolderOpen } from 'lucide-vue-next'
 import { systemApi, errMsg } from '@/api'
 import { store } from '@/store'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
-  label: { type: String, required: true },
+  label: { type: String, default: '' },
   hint: { type: String, default: '' },
-  placeholder: { type: String, default: 'D:\\...' },
+  placeholder: { type: String, default: 'Chọn thư mục…' },
 })
 const emit = defineEmits(['update:modelValue'])
 const picking = ref(false)
 
-// Hộp thoại chọn thư mục của Windows (mở bên dưới trình duyệt nếu cửa sổ trình duyệt đang được phóng to)
+// Hộp thoại chọn thư mục của Windows (do backend mở, vì giao diện không được đọc đường dẫn thật trên máy)
 async function pick() {
   picking.value = true
   try {

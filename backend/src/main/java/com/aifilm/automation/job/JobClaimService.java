@@ -5,12 +5,14 @@ import com.aifilm.automation.account.AccountRepository;
 import com.aifilm.automation.project.ProjectEntity;
 import com.aifilm.automation.project.ProjectRepository;
 import com.aifilm.automation.project.ProjectStatus;
+import com.aifilm.automation.prompt.PromptKind;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -47,7 +49,9 @@ public class JobClaimService {
             if (jobs.countByProjectIdAndStatus(p.getId(), JobStatus.GENERATING) >= p.effectiveParallel()) {
                 continue;
             }
-            Optional<JobEntity> next = jobs.findNextRunnable(p.getId());
+            boolean imagesOnly = p.isWaitAllImagesOn() && jobs.countByProjectIdAndKindAndStatusNotIn(
+                    p.getId(), PromptKind.IMAGE, List.of(JobStatus.SUCCESS, JobStatus.CANCELLED)) > 0;
+            Optional<JobEntity> next = jobs.findNextRunnable(p.getId(), imagesOnly ? 1 : 0);
             if (next.isEmpty()) {
                 continue;
             }

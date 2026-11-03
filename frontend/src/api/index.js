@@ -19,6 +19,7 @@ export const projectsApi = {
   start: (id) => data(http.post(`/projects/${id}/start`)),
   pause: (id) => data(http.post(`/projects/${id}/pause`)),
   retryFailed: (id) => data(http.post(`/projects/${id}/retry-failed`)),
+  verifyFiles: (id) => data(http.post(`/projects/${id}/verify-files`)),
 }
 
 export const jobsApi = {

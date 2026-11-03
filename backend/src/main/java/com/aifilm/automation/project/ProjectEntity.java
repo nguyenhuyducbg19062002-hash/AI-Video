@@ -52,6 +52,13 @@ public class ProjectEntity {
     private int maxParallel = 3;
     private int maxAttempts = 3;
 
+    /**
+     * true: duyệt xong TOÀN BỘ ảnh rồi mới bắt đầu tạo video (đúng quy trình "check ảnh xong → tải hết → chuyển sang video").
+     * false: cảnh nào đủ ảnh đã duyệt thì tạo video cảnh đó ngay.
+     * Kiểu Boolean (cho phép null) để thêm cột vào DB cũ không lỗi; null được hiểu là true.
+     */
+    private Boolean waitAllImages = Boolean.TRUE;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private ProjectStatus status = ProjectStatus.DRAFT;
@@ -70,6 +77,10 @@ public class ProjectEntity {
     @PreUpdate
     void onUpdate() {
         updatedAt = LocalDateTime.now();
+    }
+
+    public boolean isWaitAllImagesOn() {
+        return waitAllImages == null || waitAllImages;
     }
 
     public void pause(String reason) {

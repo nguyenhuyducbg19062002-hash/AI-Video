@@ -15,11 +15,13 @@ public interface JobRepository extends JpaRepository<JobEntity, Long> {
     /**
      * Job PENDING kế tiếp của một project: ảnh trước video, theo STT.
      * Video chỉ được chọn khi MỌI ảnh trong "Reference IDs" của nó đã SUCCESS (worker upload chính file trong Folder Ảnh).
+     * imagesOnly = 1: chỉ chọn ảnh (phim bật "duyệt xong hết ảnh rồi mới tạo video" và vẫn còn ảnh chưa xong).
      */
     @Query(value = """
             SELECT j.* FROM jobs j
             JOIN prompts p ON p.id = j.prompt_id
             WHERE j.project_id = :projectId AND j.status = 'PENDING'
+              AND (:imagesOnly = 0 OR p.kind = 'IMAGE')
               AND NOT EXISTS (
                   SELECT 1 FROM prompt_references r
                   LEFT JOIN prompts ip ON ip.project_id = p.project_id AND ip.kind = 'IMAGE'
@@ -28,9 +30,13 @@ public interface JobRepository extends JpaRepository<JobEntity, Long> {
                   WHERE r.video_prompt_id = p.id AND (ij.id IS NULL OR ij.status <> 'SUCCESS'))
             ORDER BY CASE p.kind WHEN 'IMAGE' THEN 0 ELSE 1 END, p.seq_no
             LIMIT 1""", nativeQuery = true)
-    Optional<JobEntity> findNextRunnable(@Param("projectId") long projectId);
+    Optional<JobEntity> findNextRunnable(@Param("projectId") long projectId, @Param("imagesOnly") int imagesOnly);
 
     long countByProjectIdAndStatus(Long projectId, JobStatus status);
+
+    /** Số ảnh của phim chưa xong (bỏ qua ảnh đã hủy: người dùng chủ động bỏ thì không chặn cả phim). */
+    long countByProjectIdAndKindAndStatusNotIn(Long projectId, com.aifilm.automation.prompt.PromptKind kind,
+                                               java.util.Collection<JobStatus> statuses);
 
     List<JobEntity> findByProjectId(Long projectId);
 

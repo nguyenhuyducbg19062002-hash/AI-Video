@@ -62,4 +62,10 @@ public class ProjectController {
     public Map<String, Integer> retryFailed(@PathVariable long id) {
         return Map.of("requeued", service.retryFailed(id));
     }
+
+    /** Quét file đã duyệt trong Folder Ảnh / Folder Video: thiếu hoặc hỏng thì đưa về hàng đợi tạo lại. */
+    @PostMapping("/{id}/verify-files")
+    public ProjectService.VerifyResult verifyFiles(@PathVariable long id) {
+        return service.verifyFiles(id);
+    }
 }

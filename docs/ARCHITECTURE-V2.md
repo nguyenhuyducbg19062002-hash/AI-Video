@@ -297,7 +297,7 @@ CREATE INDEX idx_evt_job ON job_events (job_id, created_at);
 | Loại | `external_id` | File cuối |
 |---|---|---|
 | Ảnh | đúng cột `Reference ID` của `reference-prompts.xlsx`, ví dụ `CHAR-DOMINIC-1` | `<Folder Ảnh>/CHAR-DOMINIC-1.png` |
-| Video | cột `STT segment`, đệm số 0 theo tổng số video (298 → 3 chữ số) | `<Folder Video>/042.mp4` |
+| Video | cột `STT segment`, đệm số 0 theo tổng số video (298 → 3 chữ số) | `<Folder Video>/<mã phim>_042.mp4`, ví dụ `tap-5-ha-cupid_042.mp4` (đổi 2026-11-03: gộp video nhiều phim một thư mục không trùng tên) |
 
 Phần mở rộng (`.png`, `.jpg`, `.mp4`) lấy theo file thật mà nền tảng trả về.
 

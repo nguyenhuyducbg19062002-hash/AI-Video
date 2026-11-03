@@ -1,40 +1,61 @@
 <template>
-  <div class="space-y-5 max-w-4xl">
-    <div class="p-5 rounded-3xl bg-slate-900 border border-slate-800">
-      <h2 class="text-xl font-black text-white">Cài đặt</h2>
-      <p class="text-slate-400 text-sm mt-1">Thông số chung cho mọi phim. Thư mục ảnh/video đặt riêng trong từng phim.</p>
-    </div>
-
-    <form @submit.prevent="save" class="p-5 rounded-3xl bg-slate-900/80 border border-slate-800 space-y-5">
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+  <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+    <form @submit.prevent="save" class="card flex flex-col">
+      <div class="card-head">
+        <SlidersHorizontal class="w-5 h-5 text-indigo-500 mt-0.5" />
+        <div>
+          <div class="card-title">Cài đặt chung</div>
+          <div class="card-sub">Áp dụng cho mọi phim. Thư mục ảnh/video đặt riêng trong từng phim.</div>
+        </div>
+      </div>
+      <div class="p-5 grid grid-cols-1 md:grid-cols-2 gap-5">
         <div v-for="f in fields" :key="f.key">
-          <label class="block text-xs font-semibold uppercase text-slate-300 mb-1.5">{{ f.label }}</label>
-          <select v-if="f.type === 'bool'" v-model="settings[f.key]" class="inp">
+          <label class="label">{{ f.label }}</label>
+          <select v-if="f.type === 'bool'" v-model="settings[f.key]" class="input">
             <option value="false">Không</option>
             <option value="true">Có</option>
           </select>
-          <input v-else v-model="settings[f.key]" type="number" :min="f.min" :max="f.max" class="inp" />
-          <p class="text-[11px] text-slate-500 mt-1">{{ f.hint }}</p>
+          <input v-else v-model="settings[f.key]" type="number" :min="f.min" :max="f.max" class="input" />
+          <p class="hint">{{ f.hint }}</p>
         </div>
       </div>
-      <div class="pt-4 border-t border-slate-800 flex justify-end">
-        <button type="submit" class="px-6 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-sm">Lưu cài đặt</button>
+      <div class="mt-auto flex justify-end px-5 py-4 border-t border-slate-100">
+        <button type="submit" class="btn-primary">Lưu cài đặt</button>
       </div>
     </form>
 
-    <div v-if="info" class="p-5 rounded-3xl bg-slate-900/60 border border-slate-800 text-xs text-slate-400 space-y-1.5">
-      <h3 class="text-sm font-bold text-slate-200 mb-2">Hệ thống</h3>
-      <div>Worker Python đang chạy: <b :class="info.workersAlive ? 'text-emerald-400' : 'text-rose-400'">{{ info.workersAlive }}</b></div>
-      <div>Dữ liệu (DB, profile tài khoản, file chờ duyệt): <button @click="open(info.dataDir)" class="font-mono text-sky-300 underline break-all">{{ info.dataDir }}</button></div>
-      <div>Log: <button @click="open(info.logsDir)" class="font-mono text-sky-300 underline break-all">{{ info.logsDir }}</button></div>
-      <div>Thư mục cài đặt: <span class="font-mono break-all">{{ info.homeDir }}</span> · Java {{ info.javaVersion }}</div>
-      <div>Selector Google Flow: <span class="font-mono">engine\selectors.json</span> trong thư mục cài đặt (sửa được khi Flow đổi giao diện, không cần cài lại).</div>
-    </div>
+    <section class="card">
+      <div class="card-head">
+        <Cpu class="w-5 h-5 text-indigo-500 mt-0.5" />
+        <div>
+          <div class="card-title">Hệ thống</div>
+          <div class="card-sub">Đường dẫn dữ liệu và trạng thái worker</div>
+        </div>
+      </div>
+      <div v-if="store.info" class="p-5 space-y-2 text-sm">
+        <div class="flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full" :class="store.info.workersAlive ? 'bg-emerald-500' : 'bg-rose-500'"></span>
+          Worker Python đang chạy: <b>{{ store.info.workersAlive }}</b>
+        </div>
+        <button v-for="d in dirs" :key="d.label" @click="open(d.path)"
+          class="w-full flex items-center gap-2 text-left px-3 py-2 rounded-xl border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/40 text-xs transition">
+          <Folder class="w-4 h-4 text-slate-400 shrink-0" />
+          <span class="text-slate-500 shrink-0">{{ d.label }}:</span>
+          <span class="font-mono text-slate-700 truncate">{{ d.path }}</span>
+        </button>
+        <div class="text-xs text-slate-500 pt-1">Thư mục cài đặt: <span class="font-mono">{{ store.info.homeDir }}</span> · Java {{ store.info.javaVersion }}</div>
+        <div class="note-info mt-3">
+          Selector Google Flow nằm ở <span class="font-mono">engine\selectors.json</span> trong thư mục cài đặt.
+          Flow đổi giao diện thì sửa file này, không cần cài lại.
+        </div>
+      </div>
+    </section>
   </div>
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { Cpu, Folder, SlidersHorizontal } from 'lucide-vue-next'
 import { settingsApi, systemApi, errMsg } from '@/api'
 import { store } from '@/store'
 
@@ -47,12 +68,14 @@ const fields = [
 ]
 
 const settings = ref({})
-const info = ref(null)
+const dirs = computed(() => store.info ? [
+  { label: 'Dữ liệu', path: store.info.dataDir },
+  { label: 'Log', path: store.info.logsDir },
+] : [])
 
 onMounted(async () => {
   try {
     settings.value = await settingsApi.get()
-    info.value = await systemApi.info()
   } catch (e) {
     store.toast(errMsg(e), 'error')
   }
@@ -62,7 +85,7 @@ async function save() {
   try {
     await settingsApi.save(settings.value)
     store.toast('Đã lưu cài đặt', 'success')
-    info.value = await systemApi.info()
+    store.refresh()
   } catch (e) {
     store.toast(errMsg(e), 'error')
   }
@@ -76,9 +99,3 @@ async function open(path) {
   }
 }
 </script>
-
-<style scoped>
-.inp {
-  @apply w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-slate-100 text-sm focus:border-sky-500 focus:outline-none;
-}
-</style>

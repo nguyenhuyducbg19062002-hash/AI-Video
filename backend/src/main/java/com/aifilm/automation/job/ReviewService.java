@@ -46,7 +46,7 @@ public class ReviewService {
 
         Path staged = StagingGuard.requireInside(Path.of(job.getPreviewPath()));
         Path dir = Path.of(prompt.getKind() == PromptKind.IMAGE ? project.getImageDir() : project.getVideoDir());
-        Path target = dir.resolve(prompt.getExternalId() + extensionOf(staged.getFileName().toString()));
+        Path target = dir.resolve(finalFileName(project, prompt, extensionOf(staged.getFileName().toString())));
         try {
             Files.createDirectories(dir);
             Path part = target.resolveSibling(target.getFileName() + ".part");
@@ -103,6 +103,18 @@ public class ReviewService {
             transitions.move(job, JobStatus.CANCELLED, null, "người dùng hủy");
         }
         return job;
+    }
+
+    /**
+     * Tên file cuối cùng:
+     *  - ảnh:  đúng ID của Omni, ví dụ CHAR-DOMINIC-1.png (Omni và worker tìm ảnh theo đúng tên này);
+     *  - video: mã phim + STT, ví dụ tap-5-ha-cupid_042.mp4 (mã phim là slug không dấu: gộp video nhiều phim
+     *    vào một thư mục vẫn không trùng tên).
+     */
+    public static String finalFileName(ProjectEntity project, PromptEntity prompt, String ext) {
+        return prompt.getKind() == PromptKind.IMAGE
+                ? prompt.getExternalId() + ext
+                : project.getCode() + "_" + prompt.getExternalId() + ext;
     }
 
     static String extensionOf(String name) {

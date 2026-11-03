@@ -7,14 +7,19 @@ import com.aifilm.automation.prompt.PromptReferenceRepository;
 import com.aifilm.automation.prompt.PromptRepository;
 import com.aifilm.automation.prompt.PromptRevisionRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.text.Normalizer;
 import java.util.*;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class ProjectService {
 
     private final ProjectRepository projects;
@@ -28,7 +33,7 @@ public class ProjectService {
 
     public record ProjectForm(String name, String code, String sourceDir, String imageDir, String videoDir,
                               RunMode runMode, Provider provider, String flowProjectUrl, String aspectRatio,
-                              Integer maxParallel, Integer maxAttempts) {}
+                              Integer maxParallel, Integer maxAttempts, Boolean waitAllImages) {}
 
     public record ProjectView(ProjectEntity project, Map<String, Long> counts, long total, long imagesTotal,
                               long imagesDone, long readyAccounts) {}
@@ -70,7 +75,52 @@ public class ProjectService {
         }
         p.setStatus(ProjectStatus.RUNNING);
         p.setPausedReason(null);
+        verifyFiles(id);   // file đã duyệt mà bị mất/hỏng thì cho chạy lại luôn trong lượt này
         return view(p);
+    }
+
+    public record VerifyResult(int checked, int missing, int broken, int requeued, List<String> details) {}
+
+    /**
+     * Bước 6 của quy trình: tìm ảnh/video ĐÃ DUYỆT mà file trong Folder Ảnh / Folder Video bị mất hoặc hỏng,
+     * rồi đưa đúng những mục đó về hàng đợi để tạo lại. Video phụ thuộc vào một ảnh bị tạo lại sẽ tự chờ ảnh mới.
+     */
+    @Transactional
+    public VerifyResult verifyFiles(long id) {
+        int checked = 0, missing = 0, broken = 0;
+        List<String> details = new ArrayList<>();
+        for (JobEntity j : jobs.findByProjectIdAndStatus(id, JobStatus.SUCCESS)) {
+            checked++;
+            Path file = j.getFinalPath() == null ? null : Path.of(j.getFinalPath());
+            Optional<String> problem = MediaCheck.problem(file);
+            if (problem.isEmpty()) {
+                continue;
+            }
+            boolean gone = file == null || !Files.exists(file);
+            if (gone) missing++; else broken++;
+            String name = file == null ? "job " + j.getId() : file.getFileName().toString();
+            details.add(name + ": " + problem.get());
+            j.setPreviewPath(null);
+            j.setFinalPath(null);
+            j.setAttempt(0);
+            j.setAccountId(null);
+            j.setErrorCode(null);
+            j.setErrorMessage((gone ? "File đã duyệt bị mất" : "File đã duyệt bị hỏng") + ", tạo lại tự động");
+            transitions.move(j, JobStatus.PENDING, null, "kiểm tra file: " + problem.get() + " → tạo lại");
+        }
+        if (missing + broken > 0) {
+            log.warn("Phim {}: {} file mất, {} file hỏng → đưa về hàng đợi", id, missing, broken);
+        }
+        return new VerifyResult(checked, missing, broken, missing + broken, details.subList(0, Math.min(details.size(), 20)));
+    }
+
+    /** Quét định kỳ các phim đang chạy (người dùng có thể xóa/ghi đè file trong folder bất cứ lúc nào). */
+    @Scheduled(fixedDelay = 600_000, initialDelay = 120_000)
+    @Transactional
+    public void verifyRunningProjects() {
+        for (ProjectEntity p : projects.findByStatusOrderByIdAsc(ProjectStatus.RUNNING)) {
+            verifyFiles(p.getId());
+        }
     }
 
     @Transactional
@@ -125,6 +175,7 @@ public class ProjectService {
         if (f.aspectRatio() != null && !f.aspectRatio().isBlank()) p.setAspectRatio(f.aspectRatio().trim());
         if (f.maxParallel() != null) p.setMaxParallel(Math.max(1, f.maxParallel()));
         if (f.maxAttempts() != null) p.setMaxAttempts(Math.max(1, f.maxAttempts()));
+        if (f.waitAllImages() != null) p.setWaitAllImages(f.waitAllImages());
     }
 
     private ProjectView view(ProjectEntity p) {

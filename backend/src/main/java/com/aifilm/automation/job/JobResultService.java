@@ -37,8 +37,12 @@ public class JobResultService {
     public void onGenerated(long jobId, GeneratedReport r) {
         JobEntity job = owned(jobId, r.workerId());
         Path staged = StagingGuard.requireInside(Path.of(r.stagedFile()));
-        if (!Files.isRegularFile(staged)) {
-            throw new IllegalArgumentException("Worker báo file không tồn tại: " + staged);
+        // File tải về rỗng / tải dở / không phải ảnh-video: không đưa người duyệt, tự tạo lại như một lỗi tạm thời
+        var broken = MediaCheck.problem(staged);
+        if (broken.isPresent()) {
+            log.warn("Job {}: file tải về bị hỏng ({}), tạo lại", jobId, broken.get());
+            onFailed(jobId, new FailureReport(r.workerId(), ErrorCode.TRANSIENT.name(), "File tải về bị hỏng: " + broken.get()));
+            return;
         }
         job.setPreviewPath(staged.toString());
         job.setRemoteRef(r.remoteRef());

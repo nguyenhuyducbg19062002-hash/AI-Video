@@ -3,8 +3,6 @@ package com.aifilm.automation.system;
 import com.aifilm.automation.worker.PythonWorkerSupervisor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.SpringApplication;
-import org.springframework.context.ApplicationContext;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
@@ -21,8 +19,9 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 public class SystemController {
 
-    private final ApplicationContext context;
     private final PythonWorkerSupervisor supervisor;
+    private final AppShutdown appShutdown;
+    private final DesktopWindow desktopWindow;
 
     @GetMapping("/info")
     public Map<String, Object> info() {
@@ -35,20 +34,23 @@ public class SystemController {
         return m;
     }
 
-    /** App chạy ngầm không có cửa sổ: nút "Thoát" trên giao diện gọi vào đây. Tắt cả worker và Edge con. */
+    /** Nút "Thoát" trên giao diện. Tắt cả worker và Edge con. */
     @PostMapping("/shutdown")
     public Map<String, String> shutdown() {
-        Thread t = new Thread(() -> {
-            try {
-                Thread.sleep(500);   // để kịp trả response
-            } catch (InterruptedException ignored) {
-                Thread.currentThread().interrupt();
-            }
-            System.exit(SpringApplication.exit(context, () -> 0));
-        }, "shutdown");
-        t.setDaemon(false);
-        t.start();
+        appShutdown.exitSoon("người dùng bấm Thoát");
         return Map.of("message", "Đang tắt ứng dụng");
+    }
+
+    /** Cửa sổ ứng dụng còn mở (giao diện gửi mỗi vài giây). */
+    @PostMapping("/ui-heartbeat")
+    public void uiHeartbeat() {
+        desktopWindow.heartbeat();
+    }
+
+    /** Cửa sổ ứng dụng vừa đóng hoặc tải lại (navigator.sendBeacon lúc pagehide). */
+    @PostMapping("/ui-closed")
+    public void uiClosed() {
+        desktopWindow.uiClosed();
     }
 
     /**
