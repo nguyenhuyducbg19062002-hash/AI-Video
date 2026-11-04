@@ -62,7 +62,19 @@ public class SystemController {
         String initial = body == null ? "" : body.getOrDefault("initial", "");
         String script = """
                 Add-Type -AssemblyName System.Windows.Forms
-                $owner = New-Object System.Windows.Forms.Form -Property @{TopMost = $true; ShowInTaskbar = $false}
+                Add-Type -Namespace Afm -Name Win -MemberDefinition @'
+                [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+                [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+                '@
+                # Cửa sổ chủ nhỏ, nằm ngoài màn hình, luôn trên cùng và ĐƯỢC KÍCH HOẠT: hộp chọn thư mục thuộc về nó nên hiện trên cùng,
+                # không bị cửa sổ ứng dụng che (tiến trình PowerShell nền mặc định không được giành tiêu điểm)
+                $owner = New-Object System.Windows.Forms.Form -Property @{TopMost = $true; ShowInTaskbar = $false; FormBorderStyle = 'None';
+                  StartPosition = 'Manual'; Location = (New-Object System.Drawing.Point(-3000, -3000)); Size = (New-Object System.Drawing.Size(1, 1))}
+                $owner.Show()
+                [Afm.Win]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero)      # nhấn/nhả Alt: được phép giành tiêu điểm từ cửa sổ khác
+                [Afm.Win]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)
+                [void][Afm.Win]::SetForegroundWindow($owner.Handle)
+                $owner.Activate()
                 $d = New-Object System.Windows.Forms.FolderBrowserDialog
                 $d.ShowNewFolderButton = $true
                 if ($env:AFM_INITIAL -and (Test-Path -LiteralPath $env:AFM_INITIAL)) { $d.SelectedPath = $env:AFM_INITIAL }
