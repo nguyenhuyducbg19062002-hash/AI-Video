@@ -18,6 +18,7 @@ import org.springframework.core.annotation.Order;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -35,10 +36,16 @@ public class JobResultService {
     private final JobTransitions transitions;
     private final AppSettingsService settings;
     private final FlowLinkRepository flowLinks;
+    private final TransactionTemplate tx;
 
     @Transactional
     public void onGenerated(long jobId, GeneratedReport r) {
         JobEntity job = owned(jobId, r.workerId());
+        if (job.isCancelRequested()) {
+            accounts.findById(job.getAccountId()).ifPresent(AccountEntity::releaseOk);
+            cancelled(job, job.getAccountId());
+            return;
+        }
         Path staged = StagingGuard.requireInside(Path.of(r.stagedFile()));
         // File tải về rỗng / tải dở / không phải ảnh-video: không đưa người duyệt, tự tạo lại như một lỗi tạm thời
         var broken = MediaCheck.problem(staged)
@@ -68,38 +75,43 @@ public class JobResultService {
     @Transactional
     public void onFailed(long jobId, FailureReport r) {
         JobEntity job = owned(jobId, r.workerId());
-        AccountEntity acc = accounts.findById(job.getAccountId()).orElseThrow();
         ErrorCode code = ErrorCode.parse(r.errorCode());
         job.setErrorCode(code.name());
         job.setErrorMessage(r.message());
+        AccountEntity acc = job.getAccountId() == null ? null : accounts.findById(job.getAccountId()).orElse(null);
+        if (acc == null) {
+            requeue(job, null, "tài khoản không còn → xoay sang tài khoản khác");
+            log.info("Job {} báo lỗi {} → {} (tài khoản không còn)", jobId, code, job.getStatus());
+            return;
+        }
 
         switch (code) {
             case QUOTA_EXCEEDED -> {
                 int minutes = settings.getIntSetting("quota_cooldown_minutes", 360);
                 acc.cooldown(LocalDateTime.now().plusMinutes(minutes), r.message());
-                requeue(job, acc, "hết quota trên " + acc.getEmail() + " → xoay sang tài khoản khác");   // không tính attempt
+                requeue(job, acc.getId(), "hết quota trên " + acc.getEmail() + " → xoay sang tài khoản khác");   // không tính attempt
             }
             case AUTH_REQUIRED -> {
                 acc.needLogin(r.message());
-                requeue(job, acc, "phiên đăng nhập của " + acc.getEmail() + " hỏng → xoay sang tài khoản khác");
+                requeue(job, acc.getId(), "phiên đăng nhập của " + acc.getEmail() + " hỏng → xoay sang tài khoản khác");
             }
             case TRANSIENT -> {
                 acc.releaseAfterError(r.message());
                 job.setAttempt(job.getAttempt() + 1);
                 int max = projects.findById(job.getProjectId()).map(ProjectEntity::getMaxAttempts).orElse(3);
                 if (job.getAttempt() < max) {
-                    requeue(job, acc, "lỗi tạm thời, thử lại " + job.getAttempt() + "/" + max);
+                    requeue(job, acc.getId(), "lỗi tạm thời, thử lại " + job.getAttempt() + "/" + max);
                 } else {
-                    fail(job, acc, "hết lượt thử (" + max + ")");
+                    fail(job, acc.getId(), "hết lượt thử (" + max + ")");
                 }
             }
             case REJECTED -> {
                 acc.releaseOk();
-                fail(job, acc, "nền tảng từ chối: cần sửa prompt");
+                fail(job, acc.getId(), "nền tảng từ chối: cần sửa prompt");
             }
             case CONFIG_ERROR -> {
                 acc.releaseOk();
-                requeue(job, acc, "lỗi cấu hình worker");
+                requeue(job, acc.getId(), "lỗi cấu hình worker");
                 projects.findById(job.getProjectId()).ifPresent(p -> p.pause("CONFIG_ERROR: " + r.message()));
             }
             case PAUSED -> {
@@ -107,7 +119,7 @@ public class JobResultService {
                 acc.releaseOk();
                 job.setErrorCode(null);
                 job.setErrorMessage(null);
-                requeue(job, acc, "người dùng tạm dừng: " + r.message());
+                requeue(job, acc.getId(), "người dùng tạm dừng: " + r.message());
                 projects.findById(job.getProjectId()).ifPresent(p -> p.pause(r.message()
                         + ". Chọn cảnh ở trang Danh sách cảnh (nút \"Chạy cảnh này\") hoặc bấm Chạy để làm tiếp."));
             }
@@ -116,13 +128,11 @@ public class JobResultService {
                 acc.setLeasedJobId(null);
                 acc.setStatus(com.aifilm.automation.account.AccountStatus.DISABLED);
                 acc.setLastErrorMessage(r.message() + " → sửa tài khoản rồi bấm \"Bật lại\"");
-                requeue(job, acc, "tài khoản " + acc.getEmail() + " lỗi cấu hình (" + r.message() + ") → tắt tài khoản, xoay sang tài khoản khác");
+                requeue(job, acc.getId(), "tài khoản " + acc.getEmail() + " lỗi cấu hình (" + r.message() + ") → tắt tài khoản, xoay sang tài khoản khác");
             }
             case CANCELLED -> {
                 acc.releaseOk();
-                job.setWorkerId(null);
-                job.setRunPriority(null);
-                transitions.move(job, JobStatus.CANCELLED, acc.getId(), "người dùng hủy");
+                cancelled(job, acc.getId());
             }
         }
         log.info("Job {} báo lỗi {} → {} ({})", jobId, code, job.getStatus(), r.message());
@@ -139,12 +149,16 @@ public class JobResultService {
 
     /** Worker im lặng quá 5 phút (crash, máy ngủ): coi như lỗi tạm thời để job và tài khoản không kẹt mãi. */
     @Scheduled(fixedDelay = 60_000, initialDelay = 60_000)
-    @Transactional
     public void reapStaleJobs() {
         LocalDateTime limit = LocalDateTime.now().minusMinutes(5);
         for (JobEntity job : jobs.findByStatusAndHeartbeatAtBefore(JobStatus.GENERATING, limit)) {
             log.warn("Job {}: worker {} mất liên lạc, thu hồi", job.getId(), job.getWorkerId());
-            onFailed(job.getId(), new FailureReport(job.getWorkerId(), "TRANSIENT", "Worker mất liên lạc quá 5 phút"));
+            try {
+                // mỗi job một transaction: một job lỗi không làm hỏng cả lô
+                tx.executeWithoutResult(s -> onFailed(job.getId(), new FailureReport(job.getWorkerId(), "TRANSIENT", "Worker mất liên lạc quá 5 phút")));
+            } catch (RuntimeException e) {
+                log.error("Job {}: không thu hồi được: {}", job.getId(), e.toString());
+            }
         }
     }
 
@@ -154,9 +168,7 @@ public class JobResultService {
     @Transactional
     public void recoverAfterRestart() {
         for (JobEntity job : jobs.findByStatus(JobStatus.GENERATING)) {
-            job.setAccountId(null);
-            job.setWorkerId(null);
-            transitions.move(job, JobStatus.PENDING, null, "khôi phục sau khi khởi động lại");
+            requeue(job, null, "khôi phục sau khi khởi động lại");
         }
         for (JobEntity job : jobs.findByStatus(JobStatus.DOWNLOADING)) {
             transitions.move(job, JobStatus.APPROVED, null, "khôi phục sau khi khởi động lại");
@@ -169,16 +181,45 @@ public class JobResultService {
         }
     }
 
-    private void requeue(JobEntity job, AccountEntity acc, String why) {
-        job.setAccountId(null);
-        job.setWorkerId(null);
-        transitions.move(job, JobStatus.PENDING, acc.getId(), why);
+    /** Worker bị tắt / chết: trả ngay job nó đang làm về hàng đợi (không tính lượt thử) và nhả tài khoản. */
+    @Transactional
+    public void releaseWorkerJobs(String workerId) {
+        for (JobEntity job : jobs.findByStatusAndWorkerId(JobStatus.GENERATING, workerId)) {
+            Long accId = job.getAccountId();
+            if (accId != null) {
+                accounts.findById(accId).filter(a -> a.getStatus() == AccountStatus.LEASED && Objects.equals(a.getLeasedJobId(), job.getId()))
+                        .ifPresent(AccountEntity::releaseOk);
+            }
+            requeue(job, accId, "worker " + workerId + " dừng → trả về hàng đợi");
+        }
     }
 
-    private void fail(JobEntity job, AccountEntity acc, String why) {
+    /** Người dùng đã bấm hủy thì không đưa job về hàng đợi nữa mà kết thúc là CANCELLED. */
+    private void requeue(JobEntity job, Long accId, String why) {
+        if (job.isCancelRequested()) {
+            cancelled(job, accId);
+            return;
+        }
+        job.setAccountId(null);
+        job.setWorkerId(null);
+        transitions.move(job, JobStatus.PENDING, accId, why);
+    }
+
+    private void fail(JobEntity job, Long accId, String why) {
+        if (job.isCancelRequested()) {
+            cancelled(job, accId);
+            return;
+        }
         job.setWorkerId(null);
         job.setRunPriority(null);
-        transitions.move(job, JobStatus.FAILED, acc.getId(), why);
+        transitions.move(job, JobStatus.FAILED, accId, why);
+    }
+
+    private void cancelled(JobEntity job, Long accId) {
+        job.setWorkerId(null);
+        job.setRunPriority(null);
+        job.setCancelRequested(false);
+        transitions.move(job, JobStatus.CANCELLED, accId, "người dùng hủy");
     }
 
     /** Worker vừa vào / tạo một dự án Flow cho cảnh đang chạy: nhớ ngay (kể cả khi người dùng đóng cửa sổ sau đó). */

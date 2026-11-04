@@ -67,6 +67,8 @@ public interface JobRepository extends JpaRepository<JobEntity, Long> {
 
     List<JobEntity> findByStatusAndHeartbeatAtBefore(JobStatus status, LocalDateTime limit);
 
+    List<JobEntity> findByStatusAndWorkerId(JobStatus status, String workerId);
+
     Optional<JobEntity> findByPromptId(Long promptId);
 
     List<JobEntity> findByPromptIdIn(Collection<Long> promptIds);
