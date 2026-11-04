@@ -6,9 +6,15 @@ File này chỉ chứa LOGIC (không dính Playwright) để test được bằn
 FlowOps thật (đọc lưới ô, gửi lệnh, tải về) rồi giao cho SessionRunner.
 
 Cách gắn kết quả với đúng lệnh (đã kiểm chứng trên Flow thật): dấu gắn lên ô KHÔNG bền (Flow vẽ lại ô), nhưng thứ tự ô thì ổn
-định — ô mới nhất ở đầu danh sách. Lúc bắt đầu phiên có n0 ô do Flow tạo; lệnh gửi thứ k (rank = k) luôn là ô thứ
-(tổng − n0 − 1 − k) trong danh sách. Mỗi lần gửi, FlowOps.submit xác nhận số ô tăng đúng 1; nếu số ô không còn khớp
-n0 + số lệnh đã gửi (ai đó tạo / xóa ô bằng tay) thì phiên LỆCH PHA: ngừng, các lệnh chưa xong báo lỗi tạm thời để thử lại.
+định — ô mới nhất ở ĐẦU danh sách. Lệnh gửi thứ k (rank = k) khi đã gửi tổng cộng S lệnh là ô thứ (S − 1 − k) TÍNH TỪ TRÊN CÙNG.
+
+Lưới Flow dùng cuộn ảo (cdk-virtual-scrollable): chỉ khoảng 16 ô nằm trong trang, ô cũ ở cuối bị ẩn. Vì vậy KHÔNG được dựa vào
+tổng số ô (dự án nhiều ô thì số ô không tăng khi gửi lệnh mới → tưởng chưa gửi được → gửi trùng, tốn credit). Chỉ dùng vị trí từ
+trên xuống, và FlowOps.generated_tiles phải đưa lưới về đầu trước khi đọc.
+
+Phát hiện lệch pha (ai đó tạo / xóa ô bằng tay): lúc bắt đầu ghi lại khóa của ô mới nhất đang có ("mỏ neo"). Nếu mỏ neo còn trong
+cửa sổ thì nó phải nằm đúng vị trí S (có đúng S ô mới hơn nó); sai quá desync_polls lần đọc liên tiếp thì dừng phiên, các lệnh chưa
+xong báo lỗi tạm thời để thử lại. Mỏ neo bị cuộn ảo ẩn đi (phiên dài) hoặc không có khóa ổn định thì bỏ qua kiểm tra này.
 """
 import logging
 import time
@@ -31,10 +37,11 @@ class Tile:
 
 class FlowOps(Protocol):
     def generated_tiles(self) -> list[Tile]:
-        """Các ô do Flow TẠO RA (bỏ ô ảnh người dùng tải lên), mới nhất ở đầu."""
+        """Cửa sổ các ô do Flow TẠO RA (bỏ ô ảnh người dùng tải lên), mới nhất ở đầu. Phải đưa lưới về đầu trước khi đọc."""
 
     def submit(self, job: dict) -> None:
-        """Tải ảnh tham chiếu còn thiếu, gõ prompt, bấm Tạo; chỉ trả về khi số ô đã tăng đúng 1. Ném WorkerError nếu thất bại."""
+        """Tải ảnh tham chiếu còn thiếu, gõ prompt, bấm Tạo; chỉ trả về khi chắc chắn một ô MỚI đã xuất hiện ở trên cùng
+        (không dựa vào tổng số ô). Ném WorkerError nếu thất bại."""
 
     def download(self, job: dict, tile: Tile) -> GenerationResult:
         """Tải kết quả của ô về thư mục staging của job."""
@@ -69,7 +76,7 @@ class SessionRunner:
         self.clock, self.sleep = clock, sleep
         self.slots: list[Slot] = []
         self.submitted = 0
-        self.n0 = 0
+        self.anchor: Optional[str] = None   # khóa ô mới nhất lúc bắt đầu phiên (để phát hiện lệch pha)
         self._claiming = True
         self._next_claim_at = 0.0
         self._mismatch = 0
@@ -80,7 +87,8 @@ class SessionRunner:
     def run(self, first_job: dict) -> None:
         self._pending = [first_job]   # đã nhận từ backend nhưng chưa gửi lên Flow
         try:
-            self.n0 = len(self.ops.generated_tiles())
+            first = self.ops.generated_tiles()
+            self.anchor = first[0].key if first else None
             while True:
                 self._fill(self._pending)
                 if not self.slots:
@@ -137,14 +145,17 @@ class SessionRunner:
         """False = phiên phải dừng (lệch pha)."""
         self.ops.ensure_grid()
         tiles = self.ops.generated_tiles()
-        expected = self.n0 + self.submitted
-        if len(tiles) != expected:
+        s = self.submitted
+
+        # lệch pha: mỏ neo còn trong cửa sổ thì phải có đúng s ô mới hơn nó
+        pos = next((i for i, t in enumerate(tiles) if self.anchor is not None and t.key == self.anchor), None)
+        if pos is not None and pos != s:
             self._mismatch += 1
             if self._mismatch >= self.desync_polls:
-                log.warning("Phiên Flow lệch pha: %d ô, dự kiến %d", len(tiles), expected)
+                log.warning("Phiên Flow lệch pha: có %d ô mới hơn mỏ neo, dự kiến %d", pos, s)
                 self._claiming = False
                 self._fail_all(TransientError(
-                    f"Lưới Flow lệch so với phiên ({len(tiles)} ô, dự kiến {expected}): có ai tạo / xóa ô bằng tay? Sẽ thử lại"))
+                    f"Lưới Flow lệch so với phiên ({pos} ô mới thay vì {s}): có ai tạo / xóa ô bằng tay? Sẽ thử lại"))
                 return False
             return True
         self._mismatch = 0
@@ -154,8 +165,11 @@ class SessionRunner:
             if self.stop_of(job)():
                 self._finish(job, Cancelled("Người dùng hủy job"), slot)
                 continue
-            tile = tiles[len(tiles) - self.n0 - 1 - slot.rank]
-            if tile.ready:
+            idx = s - 1 - slot.rank   # vị trí từ trên cùng: bằng số lệnh được gửi SAU lệnh này
+            tile = tiles[idx] if 0 <= idx < len(tiles) else None
+            if tile is None:
+                pass   # ô đang nằm ngoài cửa sổ cuộn ảo (rất cũ) hoặc lưới chưa vẽ xong: chờ tiếp, quá hạn thì báo lỗi bên dưới
+            elif tile.ready:
                 try:
                     result = self.ops.download(job, tile)
                 except WorkerError as e:

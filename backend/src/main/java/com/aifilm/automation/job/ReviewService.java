@@ -15,6 +15,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 
@@ -50,7 +51,10 @@ public class ReviewService {
 
         Path staged = StagingGuard.requireInside(Path.of(job.getPreviewPath()));
         Path dir = Path.of(prompt.getKind() == PromptKind.IMAGE ? project.getImageDir() : project.getVideoDir());
-        Path target = dir.resolve(finalFileName(project, prompt, extensionOf(staged.getFileName().toString())));
+        Collection<PromptEntity> videos = prompt.getKind() == PromptKind.VIDEO
+                ? prompts.findByProjectId(project.getId()).stream().filter(p -> p.getKind() == PromptKind.VIDEO).toList()
+                : List.of();
+        Path target = dir.resolve(finalFileName(project, prompt, extensionOf(staged.getFileName().toString()), videos));
         try {
             Files.createDirectories(dir);
             Path part = target.resolveSibling(target.getFileName() + ".part");
@@ -321,14 +325,16 @@ public class ReviewService {
 
     /**
      * Tên file cuối cùng:
-     *  - ảnh:  đúng ID của Omni, ví dụ CHAR-DOMINIC-1.png (Omni và worker tìm ảnh theo đúng tên này);
-     *  - video: mã phim + STT, ví dụ tap-5-ha-cupid_042.mp4 (mã phim là slug không dấu: gộp video nhiều phim
-     *    vào một thư mục vẫn không trùng tên).
+     *  - ảnh:  đúng Reference ID của file Excel, ví dụ CHAR-CLARA-1.png (Omni và worker tìm ảnh theo đúng tên này);
+     *  - video: tên cảnh + số thứ tự trong cảnh theo đúng thứ tự file all-video-prompts, ví dụ EP06-S1-01.mp4 … EP06-S1-24.mp4
+     *    (xem VideoNaming). Không đọc được tên cảnh thì dùng cách cũ: mã phim + STT, ví dụ tap-5-ha-cupid_042.mp4.
+     * @param videos mọi prompt VIDEO của phim (chỉ dùng cho video).
      */
-    public static String finalFileName(ProjectEntity project, PromptEntity prompt, String ext) {
-        return prompt.getKind() == PromptKind.IMAGE
-                ? prompt.getExternalId() + ext
-                : project.getCode() + "_" + prompt.getExternalId() + ext;
+    public static String finalFileName(ProjectEntity project, PromptEntity prompt, String ext, Collection<PromptEntity> videos) {
+        if (prompt.getKind() == PromptKind.IMAGE) {
+            return prompt.getExternalId() + ext;
+        }
+        return VideoNaming.nameFor(prompt, videos).orElseGet(() -> project.getCode() + "_" + prompt.getExternalId()) + ext;
     }
 
     static String extensionOf(String name) {

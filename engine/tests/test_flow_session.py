@@ -24,8 +24,9 @@ class Clock:
 class FakeFlow:
     """Lưới ô giả: mới nhất ở đầu; ô chạy đủ `duration` giây thì xong; kết quả xong LỆCH thứ tự gửi cũng được."""
 
-    def __init__(self, clock, durations, preexisting=2):
+    def __init__(self, clock, durations, preexisting=2, window=16):
         self.clock, self.durations = clock, durations
+        self.window = window   # cuộn ảo của Flow: chỉ khoảng 16 ô mới nhất nằm trong trang
         self.tiles = [{"owner": None, "label": f"old {i}", "done_at": -1} for i in range(preexisting)]
         self.submits, self.downloads = [], []
         self.fail_submit = {}      # jobId -> exception
@@ -40,7 +41,7 @@ class FakeFlow:
             key = f"media-{t['owner']}" if (t["owner"] is not None and done) else (f"old-{t['label']}" if t["owner"] is None else None)
             out.append(Tile(key=key, label=t["label"] if not done or t["owner"] is None else f"title {t['owner']}",
                             pct=None if done else int((self.clock.now - t["start"]) * 5) % 100, ready=done))
-        return out
+        return out[: self.window]
 
     def submit(self, job):
         if job["jobId"] in self.fail_submit:
@@ -68,9 +69,9 @@ def job(i, **kw):
 
 
 class Harness:
-    def __init__(self, durations, queue, capacity=3, **runner_kw):
+    def __init__(self, durations, queue, capacity=3, preexisting=2, window=16, **runner_kw):
         self.clock = Clock()
-        self.flow = FakeFlow(self.clock, durations)
+        self.flow = FakeFlow(self.clock, durations, preexisting=preexisting, window=window)
         self.queue = list(queue)
         self.claims = 0
         self.done, self.failed, self.started = [], [], []
@@ -117,6 +118,19 @@ class SessionRunnerTest(unittest.TestCase):
         self.assertEqual(sorted(d[0] for d in h.done), list(range(1, 8)))
         self.assertEqual(h.failed, [])
         self.assertEqual([j["jobId"] for j in h.started], list(range(1, 8)))
+
+    def test_project_with_many_tiles_still_works_because_the_grid_window_is_capped(self):
+        # lỗi thật gặp trên Flow: dự án đã có 14+ ô, cuộn ảo chỉ vẽ 16 ô → tổng số ô không tăng khi gửi lệnh mới
+        h = Harness({i: 20 for i in range(1, 8)}, [job(i) for i in range(2, 8)], preexisting=40, window=16).run(job(1))
+        self.assertEqual(h.failed, [])
+        self.assertEqual(sorted(d[0] for d in h.done), list(range(1, 8)))
+        self.assertEqual(len(h.flow.submits), 7, "mỗi lệnh chỉ được gửi MỘT lần (không gửi trùng)")
+
+    def test_a_tile_that_scrolled_out_of_the_window_does_not_cause_false_desync(self):
+        # cửa sổ rất nhỏ: mỏ neo bị ẩn sau vài lệnh; không được coi là lệch pha
+        h = Harness({i: 12 for i in range(1, 9)}, [job(i) for i in range(2, 9)], capacity=2, preexisting=3, window=5).run(job(1))
+        self.assertEqual(h.failed, [])
+        self.assertEqual(sorted(d[0] for d in h.done), list(range(1, 9)))
 
     def test_capacity_one_is_the_old_sequential_behaviour(self):
         h = Harness({1: 20, 2: 20}, [job(2)], capacity=1).run(job(1))

@@ -121,11 +121,46 @@ class _SessionOps:
     def __init__(self, driver: "FlowBrowserDriver", page, s: dict):
         self.d, self.page, self.s = driver, page, s
 
+    # Lưới Flow dùng cuộn ảo (.cdk-virtual-scrollable): chỉ ~16 ô nằm trong trang và cửa sổ đó theo vị trí cuộn. Muốn thấy các ô
+    # MỚI NHẤT (để gắn kết quả theo vị trí từ trên cùng) thì phải đưa lưới về đầu; bước tải về cuộn ô vào tầm nhìn nên sau đó
+    # lần đọc kế tiếp phải cuộn lại lên đầu.
+    _SCROLL_TOP_JS = """() => { const el = document.querySelector('.cdk-virtual-scrollable');
+        if (el && el.scrollTop > 2) { el.scrollTop = 0; return true; } return false; }"""
+
     def generated_tiles(self) -> list[Tile]:
+        if self.page.evaluate(self._SCROLL_TOP_JS):
+            self.page.wait_for_timeout(400)   # cuộn ảo vẽ lại cửa sổ ô ở đầu lưới
         js = self._TILES_JS.replace("/*KEYS*/", FlowBrowserDriver._TILE_KEYS_JS)   # ghép lúc gọi: lớp này khai báo trước FlowBrowserDriver
         rows = self.page.evaluate(js, [self.s["result_card"]])
         return [Tile(key=r["key"], label=r["label"], pct=r["pct"],
                      ready=bool(r["key"]) and not r["busy"] and r["imgOk"]) for r in rows]
+
+    @staticmethod
+    def _norm(text: str) -> str:
+        return re.sub(r"\s+", " ", text or "").strip().lower()
+
+    def _prompt_box_empty(self) -> bool:
+        try:
+            return not self.page.locator(self.s["prompt_box"]).first.inner_text(timeout=1_500).strip()
+        except PlaywrightError:
+            return False
+
+    def _accepted(self, tiles: list[Tile], before_len: int, before_top, before_labels: set, prompt: str) -> bool:
+        """
+        Flow đã nhận lệnh vừa bấm Tạo chưa? KHÔNG được chỉ dựa vào tổng số ô (cuộn ảo: có thể không đổi dù đã nhận → gửi trùng,
+        tốn credit). Chấp nhận khi: số ô tăng, HOẶC ô mới ở trên cùng mang nhãn = đầu prompt (ô đang chạy lấy prompt làm nhãn),
+        HOẶC ô trên cùng đang chạy và đổi so với trước, ô prompt đã được xóa trống (dùng khi prompt có @tag làm nhãn khác chữ).
+        """
+        if not tiles:
+            return False
+        if len(tiles) > before_len:
+            return True
+        head = self._norm(prompt)[:30]
+        if head and any(self._norm(t.label).startswith(head) and t.label not in before_labels for t in tiles[:3]):
+            return True
+        top = tiles[0]
+        changed = before_top is None or (top.key, top.label) != (before_top.key, before_top.label)
+        return top.key is None and changed and self._prompt_box_empty()
 
     def submit(self, job: dict) -> None:
         d, page, s = self.d, self.page, self.s
@@ -134,18 +169,20 @@ class _SessionOps:
         d._select_mode(page, s, job["kind"])
         uploaded = d._upload_refs(page, s, job["referenceImages"])
         page.wait_for_timeout(4_000 if uploaded else 300)   # ô ảnh vừa tải lên hiện trong lưới chậm vài giây
-        before = len(self.generated_tiles())
+        before = self.generated_tiles()
+        before_top = before[0] if before else None
+        before_labels = {t.label for t in before[:5]}
         d._compose_prompt(page, s, job["prompt"], d._ref_ids(job))
         page.locator(s["generate_button"]).first.click()
         deadline = time.monotonic() + 20
-        while time.monotonic() < deadline:   # chỉ tính là đã gửi khi ô mới xuất hiện: giữ đúng cách gắn kết quả theo thứ tự
+        while time.monotonic() < deadline:
             page.wait_for_timeout(300)
-            if len(self.generated_tiles()) > before:
+            if self._accepted(self.generated_tiles(), len(before), before_top, before_labels, job["prompt"]):
                 return
             err = self.page_error()
             if err:
                 raise (QuotaExceeded if err[0] == "quota" else Rejected)(f"Flow báo: {err[1]}")
-        raise TransientError("Flow không nhận lệnh: không thấy ô mới sau 20s")
+        raise TransientError("Flow không nhận lệnh: không thấy ô mới ở đầu lưới sau 20s")
 
     def download(self, job: dict, tile: Tile) -> GenerationResult:
         d, page, s = self.d, self.page, self.s
@@ -157,11 +194,10 @@ class _SessionOps:
         media_url = None
         if job["kind"] == "VIDEO":
             # địa chỉ màn chỉnh sửa (cho "Sửa trên Flow") không đọc được từ ô: phải mở ô rồi quay lại lưới
-            tiles_before = len(self.generated_tiles())
             media_url = d._media_url(page, s, tile.key)
             deadline = time.monotonic() + 10
-            while len(self.generated_tiles()) != tiles_before and time.monotonic() < deadline:
-                page.wait_for_timeout(300)   # lưới vẽ lại sau khi quay về: chờ đủ ô để không bị coi là lệch pha
+            while len(self.generated_tiles()) < 3 and time.monotonic() < deadline:
+                page.wait_for_timeout(300)   # lưới vẽ lại sau khi quay về: chờ có ô rồi mới đọc tiếp
         return GenerationResult(staged_file=path, remote_ref=project_url(page.url), media_url=media_url)
 
     def page_error(self):
