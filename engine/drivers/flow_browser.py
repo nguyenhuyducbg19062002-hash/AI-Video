@@ -210,12 +210,25 @@ class _SessionOps:
         before_top = before[0] if before else None
         before_labels = {t.label for t in before[:5]}
         d._compose_prompt(page, s, job["prompt"], d._ref_ids(job), mention_all=job["kind"] == "IMAGE")
+        reply_sel, auto_reply = s.get("agent_reply_marker"), s.get("agent_auto_reply")
+        can_reply = not _is_todo(reply_sel) and bool(auto_reply)
+        replies = page.locator(reply_sel).count() if can_reply else 0
         page.locator(s["generate_button"]).first.click()
         deadline = time.monotonic() + 20
+        replied, idle_since = False, None
         while time.monotonic() < deadline:
             page.wait_for_timeout(300)
             if self._accepted(self.generated_tiles(), len(before), before_top, before_labels, job["prompt"]):
                 return
+            # Tác nhân của Flow trả lời bằng một câu hỏi xác nhận (chưa tạo gì) và đứng chờ: trả lời đồng ý MỘT lần rồi chờ tiếp,
+            # thay vì bỏ cuộc (lệnh quay về hàng đợi -> gửi lại -> Flow hỏi lại, lặp mãi)
+            if can_reply and not replied and page.locator(reply_sel).count() > replies:
+                idle_since = idle_since or time.monotonic()
+                if time.monotonic() - idle_since > 4:
+                    log.info("Tác nhân Flow hỏi lại: tự trả lời \"%s\"", auto_reply)
+                    d._send(page, s, auto_reply)
+                    replied = True
+                    deadline = time.monotonic() + 40
             err = self.page_error()
             if err:
                 if err[0] == "suspicious":
@@ -228,8 +241,26 @@ class _SessionOps:
         d._dismiss_popups(page)
         staging = Path(job["stagingDir"])
         staging.mkdir(parents=True, exist_ok=True)
-        path = d._download(page, s, tile.key, staging, job["externalId"], job["kind"],
-                           job.get("videoQuality") or DEFAULT_VIDEO_QUALITY)
+        # Ô đã tạo xong trên Flow: lỗi khi tải về (nút bị che, menu chưa mở…) KHÔNG được làm lệnh quay về hàng đợi (sẽ tạo lại
+        # ảnh đã có, tốn lượt) -> thử lại vài lần, mỗi lần đóng hộp thoại / menu đang che trước.
+        last: Exception | None = None
+        path = None
+        for attempt in range(3):
+            try:
+                path = d._download(page, s, tile.key, staging, job["externalId"], job["kind"],
+                                   job.get("videoQuality") or DEFAULT_VIDEO_QUALITY)
+                break
+            except (PlaywrightError, PlaywrightTimeout) as e:
+                last = e
+                log.warning("Tải kết quả job %s lần %d/3 lỗi, thử lại: %s", job.get("jobId"), attempt + 1, str(e)[:160])
+                try:
+                    page.keyboard.press("Escape")
+                except PlaywrightError:
+                    pass
+                page.wait_for_timeout(2_000)
+                d._dismiss_popups(page)
+        if path is None:
+            raise TransientError(f"Ô kết quả đã tạo xong nhưng không tải về được: {str(last)[:300]}")
         # địa chỉ màn chỉnh sửa (cho "Sửa trên Flow") không đọc được từ ô: phải mở ô; làm ở tab phụ để KHÔNG tải lại trang chính
         media_url = self.media_url_in_new_tab(tile.key) if job["kind"] == "VIDEO" else None
         return GenerationResult(staged_file=path, remote_ref=project_url(page.url), media_url=media_url)
@@ -736,7 +767,11 @@ class FlowBrowserDriver:
             card.scroll_into_view_if_needed()
             card.hover()
             page.wait_for_timeout(500)
-            card.locator(s["tile_menu_button"]).first.click()
+            menu_btn = card.locator(s["tile_menu_button"]).first
+            try:
+                menu_btn.click(timeout=10_000)
+            except PlaywrightTimeout:   # nút bị lớp khác che (hộp thoại / câu hỏi của Tác nhân): bấm ép
+                menu_btn.click(timeout=10_000, force=True)
             page.wait_for_timeout(800)
             item = page.locator(s["download_menu_item"]).first
             item.hover()
