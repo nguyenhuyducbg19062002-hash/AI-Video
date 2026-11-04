@@ -14,6 +14,10 @@
           <div class="card-title">Danh sách tài khoản <span class="count-pill ml-1">{{ store.accounts.length }}</span></div>
           <div class="card-sub">Ưu tiên nhỏ được dùng trước. Hết quota thì job tự chuyển sang tài khoản kế tiếp.</div>
         </div>
+        <button @click="checkAll" :disabled="checkingAll" class="btn mr-2"
+          title="Tự mở Edge ẩn kiểm tra từng tài khoản Flow đã đăng nhập chưa rồi cập nhật trạng thái">
+          <RotateCcw class="w-4 h-4" :class="checkingAll ? 'animate-spin' : ''" /> Kiểm tra đăng nhập
+        </button>
         <button @click="openModal(null)" class="btn-primary"><Plus class="w-4 h-4" /> Thêm tài khoản</button>
       </div>
 
@@ -48,6 +52,8 @@
               <td class="text-xs text-slate-600">{{ providerLabel(a.provider) }}</td>
               <td>
                 <StatusBadge :status="a.status" />
+                <div v-if="checking[a.id]" class="text-[11px] text-indigo-600 mt-1">đang kiểm tra đăng nhập…</div>
+                <div v-else-if="lastCheck[a.id]" class="text-[11px] text-slate-500 mt-1 max-w-xs">{{ lastCheck[a.id] }}</div>
                 <div v-if="a.status === 'COOLDOWN' && a.cooldownUntil" class="text-[11px] text-amber-600 mt-1">tới {{ fmt(a.cooldownUntil) }}</div>
                 <div v-if="a.lastErrorMessage" class="text-[11px] text-rose-600 mt-1 max-w-xs truncate" :title="a.lastErrorMessage">{{ a.lastErrorMessage }}</div>
               </td>
@@ -55,6 +61,10 @@
               <td class="text-right whitespace-nowrap space-x-1">
                 <template v-if="a.provider === 'FLOW_BROWSER'">
                   <button @click="act(a, 'openLogin')" :disabled="a.status === 'LEASED'" class="btn btn-sm"><KeyRound class="w-3 h-3" /> Đăng nhập</button>
+                  <button @click="check(a)" :disabled="checking[a.id] || a.status === 'LEASED'" class="btn btn-sm"
+                    title="Tự mở Edge ẩn kiểm tra đã đăng nhập chưa rồi cập nhật trạng thái">
+                    <RotateCcw class="w-3 h-3" :class="checking[a.id] ? 'animate-spin' : ''" /> Kiểm tra lại
+                  </button>
                   <button v-if="a.status === 'NEED_LOGIN'" @click="act(a, 'confirmLogin')" class="btn-success btn-sm">Đã đăng nhập xong</button>
                 </template>
                 <button v-if="['COOLDOWN', 'DISABLED'].includes(a.status)" @click="act(a, 'enable')" class="btn btn-sm">Bật lại</button>
@@ -69,7 +79,7 @@
     </section>
 
     <div class="note-warn space-y-1">
-      <p><b>Đăng nhập lần đầu (Google Flow):</b> bấm "Đăng nhập" → Edge mở với profile riêng của tài khoản → đăng nhập Google, mở thử Flow → <b>đóng cửa sổ Edge đó</b> → bấm "Đã đăng nhập xong".</p>
+      <p><b>Đăng nhập lần đầu (Google Flow):</b> bấm "Đăng nhập" → Edge mở với profile riêng của tài khoản → đăng nhập Google, mở thử Flow → <b>đóng cửa sổ Edge đó</b>. App tự kiểm tra và đổi sang "Sẵn sàng" (không cần bấm gì thêm). Nếu trạng thái chưa đổi, bấm <b>"Kiểm tra lại"</b>; "Đã đăng nhập xong" chỉ để ép sang "Sẵn sàng" khi bạn chắc chắn.</p>
       <p>Tool không lưu mật khẩu. Phiên hết hạn thì tài khoản tự chuyển sang "Cần đăng nhập" và job chạy tiếp bằng tài khoản khác.</p>
     </div>
 
@@ -144,8 +154,8 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
-import { KeyRound, Pencil, Plus, Trash2, User, Users, X } from 'lucide-vue-next'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { KeyRound, Pencil, Plus, RotateCcw, Trash2, User, Users, X } from 'lucide-vue-next'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { accountsApi, errMsg } from '@/api'
 import { store } from '@/store'
@@ -181,7 +191,7 @@ async function save() {
 }
 
 const MSG = {
-  openLogin: 'Đã mở Edge. Đăng nhập Google, đóng cửa sổ Edge, rồi bấm "Đã đăng nhập xong".',
+  openLogin: 'Đã mở Edge. Đăng nhập Google rồi ĐÓNG cửa sổ Edge đó: app tự nhận ra và chuyển sang "Sẵn sàng".',
   confirmLogin: 'Tài khoản đã sẵn sàng',
   enable: 'Đã bật lại tài khoản',
   disable: 'Đã tắt tài khoản',
@@ -192,10 +202,78 @@ async function act(a, action) {
     await accountsApi[action](a.id)
     store.toast(MSG[action], 'success')
     await store.refresh()
+    if (action === 'openLogin') watchLogin(a)
   } catch (e) {
     store.toast(errMsg(e), 'error')
   }
 }
+
+// ---- Kiểm tra đăng nhập: app tự mở Edge ẩn với profile của tài khoản, xem đã đăng nhập chưa rồi cập nhật trạng thái ----
+const checking = ref({})        // id tài khoản → đang kiểm tra
+const lastCheck = ref({})       // id tài khoản → thông báo của lần kiểm tra gần nhất
+const checkingAll = ref(false)
+let alive = true
+onBeforeUnmount(() => { alive = false })
+
+const isFlow = (a) => a.provider === 'FLOW_BROWSER'
+
+/** silent: không hiện thông báo (kiểm tra nền); chỉ báo khi tài khoản vừa chuyển sang Sẵn sàng. */
+async function check(a, silent = false) {
+  if (checking.value[a.id]) return null
+  checking.value = { ...checking.value, [a.id]: true }
+  try {
+    const r = await accountsApi.checkLogin(a.id)
+    lastCheck.value = { ...lastCheck.value, [a.id]: r.message }
+    if (!silent || (a.status !== 'READY' && r.account?.status === 'READY')) {
+      store.toast(`${a.email}: ${r.message}`, r.account?.status === 'READY' ? 'success' : 'error')
+    }
+    await store.refresh()
+    return r
+  } catch (e) {
+    if (!silent) store.toast(errMsg(e), 'error')
+    return null
+  } finally {
+    checking.value = { ...checking.value, [a.id]: false }
+  }
+}
+
+async function checkAll() {
+  checkingAll.value = true
+  try {
+    for (const a of [...store.accounts].filter((x) => isFlow(x) && x.status !== 'LEASED')) {
+      if (!alive) break
+      await check(a, false)
+    }
+  } finally {
+    checkingAll.value = false
+  }
+}
+
+// Sau khi bấm "Đăng nhập": cứ 6 giây kiểm tra một lần (tối đa ~6 phút). Cửa sổ Edge đăng nhập còn mở thì kết quả là "đang mở";
+// đăng nhập xong và đóng cửa sổ thì lần kiểm tra kế tiếp thấy đã đăng nhập → tài khoản tự chuyển sang Sẵn sàng.
+const watching = new Set()
+async function watchLogin(a) {
+  if (watching.has(a.id)) return
+  watching.add(a.id)
+  try {
+    for (let i = 0; i < 60 && alive; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 6000))
+      if (!alive) break
+      const r = await check(a, true)
+      if (r?.account?.status === 'READY') break
+    }
+  } finally {
+    watching.delete(a.id)
+  }
+}
+
+// Mở trang: tài khoản đang "Cần đăng nhập" được kiểm tra một lần (có thể đã đăng nhập từ trước mà trạng thái bị kẹt)
+onMounted(async () => {
+  for (const a of store.accounts.filter((x) => isFlow(x) && x.status === 'NEED_LOGIN')) {
+    if (!alive) break
+    await check(a, true)
+  }
+})
 
 async function remove(a) {
   if (!confirm(`Xóa tài khoản ${a.email}? Thư mục profile (cookie) vẫn giữ trên đĩa.`)) return

@@ -25,6 +25,7 @@ public class AccountController {
     static final String FLOW_URL = "https://flow.google.com/";
 
     private final AccountRepository accounts;
+    private final AccountLoginService login;
 
     public record AccountForm(String email, Provider provider, String proxy, Integer priority, String notes,
                               String credentialFile, String gcpProject, String gcpLocation, Integer maxConcurrent) {}
@@ -92,9 +93,20 @@ public class AccountController {
         Files.createDirectories(Path.of(a.getProfileDir()));
         // Mở thẳng trang Google Flow; người dùng bấm "Sign in" trên Flow và tự đăng nhập.
         // (Không dùng accounts.google.com/AccountChooser?Email=…: Google trả lỗi 400 Bad Request cho link này.)
+        // --disable-background-mode: đóng cửa sổ là Edge thoát hẳn, nhả profile (không thì Edge còn chạy nền giữ khóa profile,
+        // job và nút Kiểm tra đăng nhập sau đó báo "profile đang mở ở cửa sổ khác")
         new ProcessBuilder(edge.toString(), "--user-data-dir=" + a.getProfileDir(),
-                "--no-first-run", "--no-default-browser-check", FLOW_URL).start();
+                "--no-first-run", "--no-default-browser-check", "--disable-background-mode", FLOW_URL).start();
         return a;
+    }
+
+    /**
+     * "Kiểm tra đăng nhập" (nút Kiểm tra lại): tự mở Edge ẩn với profile của tài khoản, xem đã đăng nhập chưa rồi cập nhật trạng thái
+     * (Cần đăng nhập → Sẵn sàng khi đã đăng nhập đúng tài khoản). Không @Transactional: xem AccountLoginService.check.
+     */
+    @PostMapping("/{id}/check-login")
+    public AccountLoginService.CheckResponse checkLogin(@PathVariable long id) {
+        return login.check(id);
     }
 
     /** Người dùng xác nhận đã đăng nhập xong và đã ĐÓNG cửa sổ Edge của tài khoản. */
@@ -102,8 +114,10 @@ public class AccountController {
     @Transactional
     public AccountEntity confirmLogin(@PathVariable long id) {
         AccountEntity a = accounts.findById(id).orElseThrow();
-        a.releaseOk();
-        a.setLastErrorMessage(null);
+        if (a.getStatus() == AccountStatus.LEASED) {
+            throw new IllegalStateException("Tài khoản đang chạy job");
+        }
+        a.markReady();
         return a;
     }
 
@@ -112,9 +126,7 @@ public class AccountController {
     public AccountEntity enable(@PathVariable long id) {
         AccountEntity a = accounts.findById(id).orElseThrow();
         if (a.getStatus() != AccountStatus.LEASED) {
-            a.releaseOk();
-            a.setCooldownUntil(null);
-            a.setLastErrorMessage(null);
+            a.markReady();
         }
         return a;
     }

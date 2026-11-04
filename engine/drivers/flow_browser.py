@@ -812,7 +812,7 @@ class FlowBrowserDriver:
                 try:
                     with tm.step("vao_du_an"):
                         page = self._open_flow(ctx, job)
-                        self._ensure_project(page, job)
+                        self._ensure_project(page, job, strict=True)
                         if "/project/" not in page.url:
                             raise TransientError("Chưa vào được dự án trên Flow")
                         self._wait_prompt_box(page, s)
@@ -885,7 +885,7 @@ class FlowBrowserDriver:
         with self._browser(first_job["account"], headless=first_job.get("headless", False)) as ctx:
             try:
                 page = self._open_flow(ctx, first_job)
-                self._ensure_project(page, first_job)
+                self._ensure_project(page, first_job, strict=True)
                 if "/project/" not in page.url:
                     raise TransientError("Chưa vào được dự án trên Flow")
                 self._wait_prompt_box(page, s)
@@ -1052,20 +1052,23 @@ class FlowBrowserDriver:
             return GenerationResult(staged_file=captured[-1], remote_ref=project_url(page.url) if not page.is_closed() else None)
 
     @staticmethod
-    def _ensure_project(page, job: dict):
+    def _ensure_project(page, job: dict, strict: bool = False):
         """
         Flow mở ra màn hình chính (danh sách dự án): chưa có ô prompt. Phim đã có "Link dự án trên Flow" thì vào thẳng
         dự án đó; chưa có thì bấm "Dự án mới" / "New project". Dự án tạo ra được backend nhớ lại cho các cảnh sau.
+        strict (chạy ngầm): nhận ra tài khoản CHƯA ĐĂNG NHẬP thì ném AuthRequired để backend đưa tài khoản về "Cần đăng nhập".
         """
         try:
-            FlowBrowserDriver._enter_project(page)
+            FlowBrowserDriver._enter_project(page, strict)
+        except AuthRequired as e:
+            raise AuthRequired(f"{job['account'].get('email')}: {e}") from e
         finally:
             url = page.url if not page.is_closed() else ""
             if "/project/" in url and project_url(url) != project_url(job.get("flowProjectUrl")) and callable(job.get("_on_project")):
                 job["_on_project"](project_url(url))
 
     @staticmethod
-    def _enter_project(page):
+    def _enter_project(page, strict: bool = False):
         if "/project/" in page.url:
             # link đã nhớ có thể trỏ tới dự án đã bị xóa: Flow chuyển sang /404?reason=project sau khi tải trang
             # chờ tới khi ô prompt hiện (dự án còn: vào thẳng) hoặc Flow chuyển sang /404 (dự án đã xóa); tối đa 6s
@@ -1084,17 +1087,53 @@ class FlowBrowserDriver:
             page.goto(FLOW_URL, wait_until="domcontentloaded")
             page.wait_for_timeout(3_000)
         try:
-            name = re.compile(r"Dự án mới|New project", re.I)
-            target = page.get_by_role("button", name=name)
-            if target.count() == 0:
-                target = page.get_by_text(name)
-            if target.count() > 0:
+            target = FlowBrowserDriver._new_project_button(page)
+            if target is not None:
                 target.first.click()
                 page.wait_for_url(re.compile(r"/project/"), timeout=20_000)
                 page.wait_for_timeout(3_000)
                 log.info("Đã bấm 'Dự án mới' trên Flow → %s", page.url)
+            elif strict and FlowBrowserDriver._logged_out(page):
+                # chạy ngầm: không ai ngồi xem để đăng nhập hộ. (Chế độ "Mở Flow" thì để người dùng tự đăng nhập trong cửa sổ.)
+                raise AuthRequired("chưa đăng nhập Google Flow hoặc phiên đã hết hạn")
         except PlaywrightError as e:
             log.warning("Không tự bấm 'Dự án mới' được, người dùng làm tay: %s", str(e)[:200])
+
+    @staticmethod
+    def _new_project_button(page, timeout_s: float = 15.0):
+        """
+        Nút "Dự án mới / New project" ở trang chủ Flow. PHẢI CHỜ nó xuất hiện: ngay sau khi tải trang chưa có (đã đo: hiện sau
+        khoảng 0,5s); đếm ngay thì tưởng không có và job báo "Chưa vào được dự án" trong chưa đầy 1 giây (lỗi đã gặp: mọi lần
+        chạy đầu tiên của phim chưa có link dự án Flow đều thất bại, 3 lần liền thì tài khoản bị cho nghỉ).
+        """
+        name = re.compile(r"Dự án mới|New project", re.I)
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            for loc in (page.get_by_role("button", name=name), page.get_by_text(name)):
+                if loc.count() > 0:
+                    return loc
+            if "accounts.google.com" in page.url:
+                return None   # Flow đã chuyển sang trang đăng nhập Google
+            page.wait_for_timeout(150)
+        return None
+
+    @staticmethod
+    def _logged_out(page) -> bool:
+        """
+        Trang Flow đang ở trạng thái CHƯA đăng nhập. Đã đo: tài khoản đăng nhập có huy hiệu aria-label "Google Account: … (email)"
+        ngay sau khi tải; chưa đăng nhập thì Flow đưa về trang giới thiệu (…/about) hoặc trang đăng nhập Google, không có huy hiệu.
+        Trang gần như trống (chưa tải xong / mất mạng) thì KHÔNG kết luận (tránh báo "cần đăng nhập" oan).
+        """
+        if "accounts.google.com" in page.url or "/about" in page.url.split("flow.google.com", 1)[-1][:12]:
+            return True
+        try:
+            return bool(page.evaluate("""() => {
+                if ((document.body.innerText || '').trim().length < 40) return false;
+                const badge = [...document.querySelectorAll('[aria-label]')].some(e => {
+                    const a = e.getAttribute('aria-label') || ''; return /@/.test(a) && /google/i.test(a); });
+                return !badge; }"""))
+        except PlaywrightError:
+            return False
 
     def _prefill_best_effort(self, page, s: dict, job: dict) -> bool:
         """Tự upload ảnh còn thiếu + gõ prompt có chip @tag (không bấm Tạo). True nếu gắn được đủ ảnh."""

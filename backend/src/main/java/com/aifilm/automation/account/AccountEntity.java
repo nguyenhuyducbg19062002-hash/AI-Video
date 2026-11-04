@@ -93,6 +93,19 @@ public class AccountEntity {
     }
 
     /**
+     * Đưa tài khoản về sẵn sàng bằng quyết định của NGƯỜI DÙNG hoặc của lần kiểm tra đăng nhập ("Đã đăng nhập xong", "Bật lại",
+     * "Kiểm tra đăng nhập"). Khác releaseOk: không phụ thuộc trạng thái hiện tại (releaseOk chỉ nhả tài khoản đang chạy job,
+     * nên dùng nó cho các nút này thì tài khoản "Cần đăng nhập" / "Tạm nghỉ" / "Đã tắt" không bao giờ đổi trạng thái).
+     */
+    public void markReady() {
+        status = AccountStatus.READY;
+        leasedJobId = null;
+        consecutiveFailures = 0;
+        cooldownUntil = null;
+        lastErrorMessage = null;
+    }
+
+    /**
      * Một job của tài khoản vừa xong. stillBusy = tài khoản còn job khác đang chạy (chạy song song): giữ nguyên LEASED,
      * chỉ khi job cuối xong mới về READY. Tài khoản đã bị đưa vào nghỉ / cần đăng nhập / tắt thì không bị lật về READY.
      */

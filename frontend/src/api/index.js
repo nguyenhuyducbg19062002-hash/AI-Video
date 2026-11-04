@@ -80,6 +80,8 @@ export const accountsApi = {
   remove: (id) => data(http.delete(`/accounts/${id}`)),
   openLogin: (id) => data(http.post(`/accounts/${id}/open-login`)),
   confirmLogin: (id) => data(http.post(`/accounts/${id}/confirm-login`)),
+  /** Tự mở Edge ẩn với profile của tài khoản, xem đã đăng nhập chưa rồi cập nhật trạng thái: { account, state, email, message } */
+  checkLogin: (id) => data(http.post(`/accounts/${id}/check-login`, null, { timeout: 100000 })),
   enable: (id) => data(http.post(`/accounts/${id}/enable`)),
   disable: (id) => data(http.post(`/accounts/${id}/disable`)),
 }
