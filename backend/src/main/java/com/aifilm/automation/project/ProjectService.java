@@ -30,6 +30,7 @@ public class ProjectService {
     private final ProjectAssetRepository assets;
     private final JobTransitions transitions;
     private final OmniImportService importer;
+    private final AssetService assetService;
     private final FlowLinkRepository flowLinks;
 
     public record ProjectForm(String name, String code, String sourceDir, String imageDir, String videoDir,
@@ -39,7 +40,13 @@ public class ProjectService {
 
     /** missingRefs: Reference ID phim cần mà chưa có prompt tạo ảnh và chưa có ảnh trong kho (ảnh gốc cần "Thêm ảnh có sẵn"). */
     public record ProjectView(ProjectEntity project, Map<String, Long> counts, long total, long imagesTotal,
-                              long imagesDone, long readyAccounts, long assetsCount, List<String> missingRefs) {}
+                              long imagesDone, long readyAccounts, long assetsCount, List<String> missingRefs,
+                              List<String> autoImport) {
+        /** autoImport: các dòng tóm tắt việc tự nạp lúc tạo phim (rỗng ở mọi chỗ khác). */
+        ProjectView withAutoImport(List<String> lines) {
+            return new ProjectView(project, counts, total, imagesTotal, imagesDone, readyAccounts, assetsCount, missingRefs, lines);
+        }
+    }
 
     @Transactional(readOnly = true)
     public List<ProjectView> list() {
@@ -61,6 +68,47 @@ public class ProjectService {
         }
         p.setCode(code);
         return view(projects.save(p));
+    }
+
+    /**
+     * Ngay sau khi tạo phim: tự nạp các mục của phim, người dùng khỏi bấm "Import prompt" / "Thêm ảnh có sẵn".
+     *  - Thư mục kết quả Omni có file prompt (Excel / txt) thì nạp prompt + gán ảnh có sẵn (ở mọi thư mục con, kể cả Folder Ảnh).
+     *  - Folder Ảnh nằm ngoài thư mục Omni thì gán thêm ảnh có sẵn trong đó.
+     *  - Không có gì để nạp thì bỏ qua, không báo lỗi. Nạp lỗi cũng KHÔNG làm hỏng việc tạo phim: chỉ ghi chú lại.
+     * Không đánh dấu @Transactional: phiên nạp tự mở transaction của nó, phim đã được lưu xong ở bước create.
+     */
+    public ProjectView autoImportAfterCreate(long id) {
+        ProjectEntity p = projects.findById(id).orElseThrow();
+        List<String> notes = new ArrayList<>();
+        String src = p.getSourceDir() == null ? "" : p.getSourceDir().trim();
+        Path srcDir = null;
+        try {
+            if (!src.isEmpty() && Files.isDirectory(Path.of(src))) {
+                srcDir = Path.of(src).toAbsolutePath().normalize();
+                try {
+                    notes.addAll(AutoImportSummary.lines(importer.importFolder(id, src)));
+                } catch (IllegalArgumentException e) {
+                    // thư mục chưa có file prompt nào: không phải lỗi, chỉ là chưa có gì để nạp
+                    if (e.getMessage() == null || !e.getMessage().startsWith("Không thấy file prompt")) {
+                        notes.add("Không nạp tự động được: " + e.getMessage());
+                    }
+                }
+            }
+            Path img = Path.of(p.getImageDir()).toAbsolutePath().normalize();
+            boolean insideSource = srcDir != null && img.startsWith(srcDir);
+            if (!insideSource && Files.isDirectory(img) && !prompts.findByProjectId(id).isEmpty()) {
+                var a = assetService.importFolder(id, img.toString());
+                int n = a.added() + a.replaced();
+                if (n > 0) {
+                    notes.add("✓ " + n + " ảnh có sẵn trong Folder Ảnh đã gán vào phim"
+                            + (a.skippedJobs() > 0 ? " (" + a.skippedJobs() + " ảnh khỏi phải tạo)" : ""));
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Tự nạp phim {} lỗi: {}", p.getCode(), e.toString());
+            notes.add("Không nạp tự động được (" + e.getMessage() + "): bấm \"Import prompt\" để thử lại.");
+        }
+        return view(projects.findById(id).orElseThrow()).withAutoImport(notes);
     }
 
     @Transactional
@@ -246,7 +294,7 @@ public class ProjectService {
                             && a.getCooldownUntil().isBefore(java.time.LocalDateTime.now())))
                 .count();
         return new ProjectView(p, counts, total, imageJobs.size(), imagesDone, ready,
-                assets.findByProjectId(p.getId()).size(), importer.missingRefs(p.getId()));
+                assets.findByProjectId(p.getId()).size(), importer.missingRefs(p.getId()), List.of());
     }
 
     private static void ensureDir(String dir, String label) {

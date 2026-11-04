@@ -54,7 +54,9 @@ public class ProjectController {
 
     @PostMapping
     public ProjectView create(@RequestBody ProjectForm form) {
-        return service.create(form);
+        ProjectView created = service.create(form);
+        // tự nạp prompt + ảnh có sẵn ngay sau khi tạo (phim đã được lưu xong; nạp lỗi không làm hỏng việc tạo phim)
+        return service.autoImportAfterCreate(created.project().getId());
     }
 
     @PutMapping("/{id}")

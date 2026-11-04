@@ -223,7 +223,10 @@ async function submit() {
     const saved = props.project
       ? await projectsApi.update(props.project.id, form.value)
       : await projectsApi.create(form.value)
-    store.toast(props.project ? 'Đã lưu phim' : 'Đã tạo phim. Bấm "Import prompt" để nạp dữ liệu.', 'success')
+    // phim mới: backend đã tự nạp prompt + ảnh có sẵn; hiện kết quả (không có gì để nạp thì chỉ nhắc nhẹ)
+    const notes = Array.isArray(saved?.autoImport) ? saved.autoImport : []
+    store.toast(props.project ? 'Đã lưu phim'
+      : 'Đã tạo phim.' + (notes.length ? '\n' + notes.join('\n') : ' Chưa có file prompt để nạp: thêm Excel ảnh / video ở trang Phim.'), 'success')
     emit('saved', saved)
   } catch (e) {
     store.toast(errMsg(e), 'error')

@@ -40,6 +40,32 @@ public class AssetService {
 
     public record FolderImportResult(int added, int replaced, int notReferenced, int skippedJobs, List<String> notReferencedNames) {}
 
+    /**
+     * Các file ảnh trong thư mục (cả thư mục con), BỎ QUA mọi thư mục con bắt đầu bằng "_" hoặc ".": đó là thư mục cất riêng
+     * như "_ket-qua-sai" (ảnh sai người dùng loại ra); nạp chúng sẽ biến ảnh sai thành ảnh có sẵn và hủy việc tạo lại.
+     * Chỉ áp dụng cho thư mục con; chính thư mục được chọn thì luôn quét.
+     */
+    static List<Path> imageFiles(Path src) {
+        try (Stream<Path> walk = Files.walk(src)) {
+            return walk.filter(Files::isRegularFile)
+                    .filter(f -> IMAGE_EXT.contains(ext(f)))
+                    .filter(f -> !inSideFolder(src.relativize(f)))
+                    .sorted().toList();
+        } catch (IOException e) {
+            throw new UncheckedIOException("Không đọc được thư mục " + src, e);
+        }
+    }
+
+    private static boolean inSideFolder(Path relative) {
+        for (int i = 0; i < relative.getNameCount() - 1; i++) {
+            String n = relative.getName(i).toString();
+            if (n.startsWith("_") || n.startsWith(".")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Ghi / cập nhật một ảnh trong kho. */
     @Transactional
     public ProjectAssetEntity upsert(long projectId, String externalId, Path file, String source) {
@@ -94,12 +120,7 @@ public class AssetService {
         }
         int added = 0, replaced = 0, skippedJobs = 0;
         List<String> notReferenced = new ArrayList<>();
-        List<Path> files;
-        try (Stream<Path> walk = Files.walk(src)) {
-            files = walk.filter(Files::isRegularFile).filter(f -> IMAGE_EXT.contains(ext(f))).sorted().toList();
-        } catch (IOException e) {
-            throw new UncheckedIOException("Không đọc được thư mục " + folder, e);
-        }
+        List<Path> files = imageFiles(src);
         for (Path f : files) {
             String id = baseName(f);
             if (!wanted.contains(id) && !imagePrompts.containsKey(id)) {
