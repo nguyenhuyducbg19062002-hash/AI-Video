@@ -2,6 +2,7 @@ package com.aifilm.automation.job;
 
 import com.aifilm.automation.account.AccountEntity;
 import com.aifilm.automation.account.AccountRepository;
+import com.aifilm.automation.account.AccountStatus;
 import com.aifilm.automation.project.ProjectEntity;
 import com.aifilm.automation.project.ProjectRepository;
 import com.aifilm.automation.project.ProjectStatus;
@@ -59,11 +60,11 @@ public class JobClaimService {
      * - Ảnh đang tạo / chờ duyệt, hoặc thiếu ảnh mà không có prompt tạo: cảnh chờ, chuyển sang cảnh kế tiếp.
      * Ảnh không cảnh nào cần thì không được tạo (muốn tạo thì bấm "Chạy cảnh này" hoặc bật "duyệt hết ảnh trước").
      */
-    Optional<JobEntity> nextBySceneOrder(ProjectEntity p) {
+    Optional<JobEntity> nextBySceneOrder(ProjectEntity p, Set<Long> skip) {
         Set<String> have = new HashSet<>();
         assets.findByProjectId(p.getId()).forEach(a -> have.add(a.getExternalId()));
         for (JobEntity video : jobs.findPendingVideoJobsInOrder(p.getId())) {
-            Optional<JobEntity> pick = runnableFor(video, p.getId(), have, new HashSet<>(), 0);
+            Optional<JobEntity> pick = runnableFor(video, p.getId(), have, new HashSet<>(), 0).filter(j -> !skip.contains(j.getId()));
             if (pick.isPresent()) {
                 return pick;
             }
@@ -108,35 +109,61 @@ public class JobClaimService {
             }
             boolean imagesOnly = !p.isSkipMissingRefsOn() && p.isWaitAllImagesOn() && jobs.countByProjectIdAndKindAndStatusNotIn(
                     p.getId(), PromptKind.IMAGE, List.of(JobStatus.SUCCESS, JobStatus.CANCELLED)) > 0;
-            Optional<JobEntity> next;
-            if (!p.isSkipMissingRefsOn() && !p.isWaitAllImagesOn() && !p.isSelectedOnlyOn()) {
-                // Chạy theo cảnh: cảnh người dùng bấm "Chạy cảnh này" đi trước như cũ, rồi tới từng cảnh theo thứ tự
-                next = jobs.findNextRunnable(p.getId(), 0, 1, 0);
+            Set<Long> skip = new HashSet<>(Set.of(-1L));   // job đã xét trong lượt này (-1: để NOT IN không rỗng)
+            JobEntity job = null;
+            AccountEntity a = null;
+            while (job == null) {
+                Optional<JobEntity> next;
+                if (!p.isSkipMissingRefsOn() && !p.isWaitAllImagesOn() && !p.isSelectedOnlyOn()) {
+                    // Chạy theo cảnh: cảnh người dùng bấm "Chạy cảnh này" đi trước như cũ, rồi tới từng cảnh theo thứ tự
+                    next = jobs.findNextRunnable(p.getId(), 0, 1, 0, skip);
+                    if (next.isEmpty()) {
+                        next = nextBySceneOrder(p, skip);
+                    }
+                } else {
+                    next = jobs.findNextRunnable(p.getId(), imagesOnly ? 1 : 0, p.isSelectedOnlyOn() ? 1 : 0, p.isSkipMissingRefsOn() ? 1 : 0, skip);
+                }
                 if (next.isEmpty()) {
-                    next = nextBySceneOrder(p);
+                    if (p.isSelectedOnlyOn() && jobs.countSelectedLeft(p.getId()) == 0) {
+                        p.setSelectedOnly(false);
+                        p.pause("Đã chạy xong các cảnh bạn chọn");
+                        log.info("Phim {}: xong các cảnh đã chọn, tạm dừng", p.getCode());
+                    }
+                    break;
                 }
-            } else {
-                next = jobs.findNextRunnable(p.getId(), imagesOnly ? 1 : 0, p.isSelectedOnlyOn() ? 1 : 0, p.isSkipMissingRefsOn() ? 1 : 0);
+                JobEntity candidate = next.get();
+                skip.add(candidate.getId());
+                if (candidate.isCancelRequested()) {
+                    candidate.setCancelRequested(false);
+                    candidate.setRunPriority(null);
+                    transitions.move(candidate, JobStatus.CANCELLED, null, "người dùng hủy");
+                    continue;
+                }
+                Optional<AccountEntity> acc;
+                if (candidate.getEditInstruction() != null && candidate.getFlowAccountId() != null) {
+                    // "Sửa trên Flow": video nằm trong dự án Flow của đúng tài khoản đã tạo nó
+                    Optional<AccountEntity> owner = accounts.findById(candidate.getFlowAccountId());
+                    if (owner.isEmpty() || owner.get().getStatus() == AccountStatus.DISABLED) {
+                        dropFlowEdit(candidate, owner.isEmpty());
+                        continue;
+                    }
+                    acc = owner.filter(o -> o.getStatus() == AccountStatus.READY
+                            || (o.getStatus() == AccountStatus.COOLDOWN && o.getCooldownUntil() != null && !o.getCooldownUntil().isAfter(now)));
+                    if (acc.isEmpty()) {
+                        continue;   // tài khoản đích đang bận / cần đăng nhập: job này chờ, lấy job kế tiếp
+                    }
+                } else {
+                    acc = accounts.findNextAvailable(p.getProvider().name(), now);
+                    if (acc.isEmpty()) {
+                        break;   // job giữ PENDING; UI hiển thị "hết tài khoản"
+                    }
+                }
+                job = candidate;
+                a = acc.get();
             }
-            if (next.isEmpty()) {
-                if (p.isSelectedOnlyOn() && jobs.countSelectedLeft(p.getId()) == 0) {
-                    p.setSelectedOnly(false);
-                    p.pause("Đã chạy xong các cảnh bạn chọn");
-                    log.info("Phim {}: xong các cảnh đã chọn, tạm dừng", p.getCode());
-                }
+            if (job == null) {
                 continue;
             }
-            JobEntity candidate = next.get();
-            Optional<AccountEntity> acc = candidate.getEditInstruction() != null && candidate.getFlowAccountId() != null
-                    // "Sửa trên Flow": video nằm trong dự án Flow của đúng tài khoản đã tạo nó
-                    ? accounts.findById(candidate.getFlowAccountId()).filter(a -> a.getStatus() == com.aifilm.automation.account.AccountStatus.READY
-                        || (a.getStatus() == com.aifilm.automation.account.AccountStatus.COOLDOWN && a.getCooldownUntil() != null && !a.getCooldownUntil().isAfter(now)))
-                    : accounts.findNextAvailable(p.getProvider().name(), now);
-            if (acc.isEmpty()) {
-                continue;   // job giữ PENDING; UI hiển thị "hết tài khoản"
-            }
-            JobEntity job = next.get();
-            AccountEntity a = acc.get();
             a.lease(job.getId(), now);
             job.setAccountId(a.getId());
             job.setWorkerId(workerId);
@@ -150,5 +177,21 @@ public class JobClaimService {
             return Optional.of(payloads.forGenerate(job, p, a));
         }
         return Optional.empty();
+    }
+
+    /** Tài khoản đã tạo video trên Flow không còn dùng được: hủy lượt sửa, báo rõ cho người dùng thay vì chặn cả phim. */
+    private void dropFlowEdit(JobEntity job, boolean deleted) {
+        String msg = deleted
+                ? "Tài khoản tạo video này trên Flow đã bị xóa: đã hủy lượt \"Sửa trên Flow\". Dùng \"Tạo lại\""
+                : "Tài khoản tạo video này trên Flow đang tắt: đã hủy lượt \"Sửa trên Flow\". Bật lại tài khoản rồi sửa lại, hoặc dùng \"Tạo lại\"";
+        if (deleted) {
+            job.setFlowMediaUrl(null);
+            job.setFlowAccountId(null);
+        }
+        job.setEditInstruction(null);
+        job.setRunPriority(null);
+        job.setErrorMessage(msg);
+        transitions.move(job, JobStatus.CANCELLED, null, msg);
+        log.warn("Job {}: {}", job.getId(), msg);
     }
 }
