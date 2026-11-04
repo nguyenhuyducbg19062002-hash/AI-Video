@@ -14,6 +14,7 @@ Selector của Flow nằm trong engine/selectors.json, đọc lại mỗi job: F
 """
 import json
 import logging
+import os
 import re
 import time
 from contextlib import contextmanager
@@ -923,7 +924,9 @@ class FlowBrowserDriver:
             except (PlaywrightTimeout, AssertionError) as e:
                 raise TransientError(f"Hết thời gian chờ một phần tử trên Flow: {str(e)[:500]}") from e
             log.info("Phiên Flow song song: tối đa %d lệnh cùng lúc trên %s", capacity, first_job["account"].get("email"))
-            SessionRunner(_SessionOps(self, page, s, ctx), capacity, claim_more, on_start, on_done, on_fail, stop_of).run(first_job)
+            gap = float(os.environ.get("AFM_GAP_S", "30"))   # giãn nhịp giữa 2 lần gửi lệnh (giây); main cũ chạy tuần tự nên cách nhau cả phút
+            SessionRunner(_SessionOps(self, page, s, ctx), capacity, claim_more, on_start, on_done, on_fail, stop_of,
+                          gap_s=gap).run(first_job)
 
     def _media_url(self, page, s: dict, media_id: str) -> str | None:
         """Địa chỉ màn chỉnh sửa của kết quả (…/project/<id>/edit/<media>): mở ô kết quả rồi đọc địa chỉ, quay lại lưới."""
