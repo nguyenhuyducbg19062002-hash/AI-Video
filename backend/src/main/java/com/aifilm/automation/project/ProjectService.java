@@ -207,7 +207,9 @@ public class ProjectService {
         ensureDir(p.getVideoDir(), "Folder Video");
         if (f.runMode() != null) p.setRunMode(f.runMode());
         if (f.provider() != null) p.setProvider(f.provider());
-        p.setFlowProjectUrl(f.flowProjectUrl() == null || f.flowProjectUrl().isBlank() ? null : f.flowProjectUrl().trim());
+        // Không còn link dự án Flow chung cho cả phim: mỗi tài khoản có dự án Flow riêng, link được nhớ theo (phim, tài khoản)
+        // lúc tool vào / tạo dự án (flow_links). Xóa giá trị cũ để không bị dùng làm dự phòng cho tài khoản khác.
+        p.setFlowProjectUrl(null);
         if (f.aspectRatio() != null && !f.aspectRatio().isBlank()) p.setAspectRatio(f.aspectRatio().trim());
         if (f.maxParallel() != null) p.setMaxParallel(Math.max(1, f.maxParallel()));
         if (f.maxAttempts() != null) p.setMaxAttempts(Math.max(1, f.maxAttempts()));

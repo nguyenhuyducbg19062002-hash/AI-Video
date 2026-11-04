@@ -327,7 +327,7 @@ const start = () => run(() => projectsApi.start(id()), 'Đã cho phim chạy')
 function formOf(p, changes) {
   return {
     name: p.name, code: p.code, sourceDir: p.sourceDir, imageDir: p.imageDir, videoDir: p.videoDir,
-    runMode: p.runMode, provider: p.provider, flowProjectUrl: p.flowProjectUrl, aspectRatio: p.aspectRatio,
+    runMode: p.runMode, provider: p.provider, aspectRatio: p.aspectRatio,
     maxParallel: p.maxParallel, maxAttempts: p.maxAttempts, waitAllImages: p.waitAllImages,
     videoDuration: p.videoDuration, videoQuality: p.videoQuality, skipMissingRefs: !!p.skipMissingRefs, ...changes,
   }

@@ -127,11 +127,6 @@
           </div>
           <p class="hint col-span-2 -mt-2">Prompt Omni đã ghi sẵn thời lượng mỗi cảnh ("Requested duration: 10 seconds"); chỉ đổi độ dài khi nền tảng cần chọn riêng.</p>
         </div>
-
-        <div v-if="form.provider === 'FLOW_BROWSER'">
-          <label class="label">Link dự án trên Flow (tùy chọn)</label>
-          <input v-model="form.flowProjectUrl" placeholder="https://flow.google.com/project/..." class="input font-mono !text-[13px]" />
-        </div>
       </div>
 
       <div class="flex justify-end gap-2 px-5 py-4 border-t border-slate-100 bg-slate-50/60 rounded-b-2xl">
@@ -159,7 +154,7 @@ const modes = [
 
 const blank = () => ({
   name: '', sourceDir: '', imageDir: '', videoDir: '', runMode: 'BACKGROUND', provider: 'FLOW_BROWSER',
-  flowProjectUrl: '', aspectRatio: '16:9', maxParallel: 3, maxAttempts: 3, waitAllImages: true,
+  aspectRatio: '16:9', maxParallel: 3, maxAttempts: 3, waitAllImages: true,
   videoDuration: null, videoQuality: '720p', skipMissingRefs: true,
 })
 const form = ref(blank())
@@ -209,7 +204,7 @@ watch(() => [props.show, props.project], () => {
   scanError.value = ''
   autoName = ''
   form.value = props.project
-    ? { ...blank(), ...props.project, flowProjectUrl: props.project.flowProjectUrl || '', waitAllImages: props.project.waitAllImages !== false,
+    ? { ...blank(), ...props.project, waitAllImages: props.project.waitAllImages !== false,
         videoDuration: props.project.videoDuration ?? null, videoQuality: props.project.videoQuality || '720p',
         skipMissingRefs: !!props.project.skipMissingRefs }
     : blank()
