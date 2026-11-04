@@ -73,6 +73,18 @@
           </span>
         </label>
 
+        <label class="flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition"
+          :class="form.autoApproveImages ? 'border-emerald-200 bg-emerald-50/50' : 'border-slate-200'">
+          <input type="checkbox" v-model="form.autoApproveImages" class="mt-0.5 w-4 h-4 accent-emerald-600" />
+          <span>
+            <span class="block text-sm font-medium text-slate-700">Tự duyệt ảnh tham chiếu</span>
+            <span class="block text-[11px] text-slate-500 mt-0.5">
+              Bật: ảnh tạo xong vào kho ảnh ngay, video cần ảnh đó chạy liền (nhiều tài khoản không phải chờ bạn duyệt).
+              Tắt: bạn xem và duyệt từng ảnh trước khi video dùng ảnh đó.
+            </span>
+          </span>
+        </label>
+
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label class="label">Nền tảng</label>
@@ -146,8 +158,8 @@ const modes = [
 
 const blank = () => ({
   name: '', sourceDir: '', imageDir: '', videoDir: '', runMode: 'BACKGROUND', provider: 'FLOW_BROWSER',
-  aspectRatio: '16:9', maxParallel: 3, maxAttempts: 3, waitAllImages: true,
-  videoDuration: null, videoQuality: '720p', skipMissingRefs: true,
+  aspectRatio: '16:9', maxParallel: 3, maxAttempts: 3, waitAllImages: false,
+  videoDuration: null, videoQuality: '720p', autoApproveImages: false,
 })
 const form = ref(blank())
 const saving = ref(false)
@@ -205,7 +217,7 @@ watch(() => [props.show, props.project], () => {
   form.value = props.project
     ? { ...blank(), ...props.project, waitAllImages: props.project.waitAllImages !== false,
         videoDuration: props.project.videoDuration ?? null, videoQuality: props.project.videoQuality || '720p',
-        skipMissingRefs: !!props.project.skipMissingRefs }
+        autoApproveImages: !!props.project.autoApproveImages }
     : blank()
 }, { immediate: true })
 

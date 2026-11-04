@@ -85,6 +85,20 @@ class JobClaimServiceSceneOrderTest {
     }
 
     @Test
+    void imageNeededByMostVideos_isGeneratedFirst() {
+        JobEntity a = job(301L, 31L, PromptKind.IMAGE), b = job(302L, 32L, PromptKind.IMAGE), c = job(303L, 33L, PromptKind.IMAGE);
+        when(assets.findByProjectId(1L)).thenReturn(List.of());
+        when(jobs.findPendingVideoJobsInOrder(anyLong())).thenReturn(List.of(video1, video2));
+        refs(10L, "A", "B", "C");   // video 1 cần ảnh 1, 2, 3
+        refs(11L, "C");             // video 2 chỉ cần ảnh 3
+        refs(31L); refs(32L); refs(33L);
+        when(jobs.findImageJob(eq(1L), eq("A"))).thenReturn(Optional.of(a));
+        when(jobs.findImageJob(eq(1L), eq("B"))).thenReturn(Optional.of(b));
+        when(jobs.findImageJob(eq(1L), eq("C"))).thenReturn(Optional.of(c));
+        assertEquals(303L, service.nextBySceneOrder(project).orElseThrow().getId());   // ảnh C mở khóa 2 video
+    }
+
+    @Test
     void videoWithoutAnyReference_neverRuns() {
         when(jobs.findPendingVideoJobsInOrder(anyLong())).thenReturn(List.of(video2));
         refs(11L);   // cảnh 2 không có ảnh tham chiếu nào: bắt buộc phải có ảnh mới tạo video

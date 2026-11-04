@@ -181,6 +181,16 @@
             <span class="text-slate-700 font-medium">Tạo video ngay khi đủ ảnh của cảnh</span>
             <span class="text-[11px] text-slate-400">{{ current.project.waitAllImages === false ? '(đang bật: không đợi duyệt hết ảnh)' : '(đang tắt: video đợi duyệt hết ảnh của phim)' }}</span>
           </label>
+          <label class="flex items-center gap-2 cursor-pointer select-none" title="Bật: ảnh tham chiếu tạo xong vào kho ảnh ngay, video cần ảnh đó chạy liền không đợi bạn duyệt">
+            <button type="button" role="switch" :aria-checked="!!current.project.autoApproveImages" @click="toggleAutoApprove" :disabled="busy"
+              :class="current.project.autoApproveImages ? 'bg-emerald-500' : 'bg-slate-300'"
+              class="relative inline-flex h-5 w-9 shrink-0 rounded-full transition">
+              <span :class="current.project.autoApproveImages ? 'translate-x-4' : 'translate-x-0.5'"
+                class="inline-block h-4 w-4 mt-0.5 rounded-full bg-white shadow transition"></span>
+            </button>
+            <span class="text-slate-700 font-medium">Tự duyệt ảnh tham chiếu</span>
+            <span class="text-[11px] text-slate-400">{{ current.project.autoApproveImages ? '(đang bật)' : '(đang tắt: bạn duyệt từng ảnh)' }}</span>
+          </label>
         </div>
         <button @click="openModal(current.project)" class="btn btn-sm ml-auto"><Pencil class="w-3.5 h-3.5" /> Sửa</button>
       </div>
@@ -318,19 +328,16 @@ function formOf(p, changes) {
     name: p.name, code: p.code, sourceDir: p.sourceDir, imageDir: p.imageDir, videoDir: p.videoDir,
     runMode: p.runMode, provider: p.provider, aspectRatio: p.aspectRatio,
     maxParallel: p.maxParallel, maxAttempts: p.maxAttempts, waitAllImages: p.waitAllImages,
-    videoDuration: p.videoDuration, videoQuality: p.videoQuality, skipMissingRefs: !!p.skipMissingRefs, ...changes,
+    videoDuration: p.videoDuration, videoQuality: p.videoQuality, autoApproveImages: !!p.autoApproveImages, ...changes,
   }
 }
 
-/** Công tắc "Có ảnh sẵn thì tạo video luôn, không tạo thêm ảnh" */
-function toggleSkipMissing() {
-  const on = !current.value.project.skipMissingRefs
-  if (on && !confirm('Video sẽ chạy ngay với ảnh có sẵn (nhân vật, bối cảnh, đồ vật), KHÔNG tạo ảnh panel.\n\n'
-    + 'Prompt video của Omni dựa vào ảnh panel để giữ bố cục / vị trí từng người. Không có panel, Flow tự dựng bố cục, '
-    + 'video có thể lệch so với kịch bản. Nên thử vài cảnh trước.\n\nBật?')) return
-  return run(() => projectsApi.update(id(), formOf(current.value.project, { skipMissingRefs: on })), on
-    ? 'Đã bật: không tạo thêm ảnh, video chạy với ảnh có sẵn'
-    : 'Đã tắt: tạo ảnh panel trước rồi mới tạo video')
+/** Công tắc "Tự duyệt ảnh tham chiếu": ảnh tạo xong vào kho ngay, video cần ảnh đó chạy liền */
+function toggleAutoApprove() {
+  const on = !current.value.project.autoApproveImages
+  return run(() => projectsApi.update(id(), formOf(current.value.project, { autoApproveImages: on })), on
+    ? 'Đã bật: ảnh tạo xong được duyệt tự động'
+    : 'Đã tắt: bạn duyệt từng ảnh trước khi video dùng')
 }
 
 /** Công tắc "Tạo video ngay khi đủ ảnh của cảnh" (= tắt "duyệt xong hết ảnh rồi mới tạo video") */

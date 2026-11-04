@@ -62,14 +62,43 @@ public class JobClaimService {
     Optional<JobEntity> nextBySceneOrder(ProjectEntity p) {
         Set<String> have = new HashSet<>();
         assets.findByProjectId(p.getId()).forEach(a -> have.add(a.getExternalId()));
+        // Số video đang chờ từng ảnh (khóa = job tạo ảnh): ảnh nhiều video cùng cần được làm trước để mở khóa nhiều cảnh nhất
+        java.util.Map<Long, Integer> demand = new java.util.HashMap<>();
+        java.util.LinkedHashMap<Long, JobEntity> candidates = new java.util.LinkedHashMap<>();
+        int scanned = 0;
         for (JobEntity video : jobs.findPendingVideoJobsInOrder(p.getId())) {
+            if (++scanned > SCENE_SCAN_LIMIT) {
+                break;
+            }
+            for (PromptReferenceEntity r : references.findByVideoPromptIdOrderByOrdinalAsc(video.getPromptId())) {
+                if (!have.contains(r.getRefExternalId())) {
+                    jobs.findImageJob(p.getId(), r.getRefExternalId())
+                            .ifPresent(producer -> demand.merge(producer.getId(), 1, Integer::sum));
+                }
+            }
             Optional<JobEntity> pick = runnableFor(video, p.getId(), have, new HashSet<>(), 0);
-            if (pick.isPresent()) {
-                return pick;
+            if (pick.isEmpty()) {
+                continue;
+            }
+            if (pick.get().getKind() == PromptKind.VIDEO) {
+                if (candidates.isEmpty()) {
+                    return pick;   // video đủ ảnh và chưa có ảnh nào cần làm trước ở các cảnh phía trước
+                }
+                break;             // ảnh của cảnh trước làm trước; video này lượt sau
+            }
+            candidates.putIfAbsent(pick.get().getId(), pick.get());
+        }
+        JobEntity best = null;   // nhiều video chờ nhất; hòa thì giữ ảnh của cảnh sớm nhất
+        for (JobEntity c : candidates.values()) {
+            if (best == null || demand.getOrDefault(c.getId(), 0) > demand.getOrDefault(best.getId(), 0)) {
+                best = c;
             }
         }
-        return Optional.empty();
+        return Optional.ofNullable(best);
     }
+
+    /** Số video tối đa xét mỗi lần chọn việc (phim hàng nghìn cảnh không được quét hết mỗi lần claim). */
+    private static final int SCENE_SCAN_LIMIT = 60;
 
     /** Job nên chạy để đưa `job` tiến lên: chính nó nếu đủ ảnh, ngược lại là job tạo một ảnh còn thiếu của nó. */
     private Optional<JobEntity> runnableFor(JobEntity job, long projectId, Set<String> have, Set<Long> visited, int depth) {

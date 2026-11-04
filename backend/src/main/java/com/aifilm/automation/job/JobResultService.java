@@ -35,6 +35,7 @@ public class JobResultService {
     private final JobTransitions transitions;
     private final AppSettingsService settings;
     private final FlowLinkRepository flowLinks;
+    private final ReviewService review;
 
     @Transactional
     public void onGenerated(long jobId, GeneratedReport r) {
@@ -65,6 +66,25 @@ public class JobResultService {
         // chạy song song: tài khoản còn job khác đang tạo thì vẫn giữ LEASED, chỉ job cuối xong mới về READY
         boolean busy = otherJobsRunning(job);
         accounts.findById(job.getAccountId()).ifPresent(a -> a.releaseOk(busy));
+    }
+
+    /**
+     * Phim bật "tự duyệt ảnh": ảnh vừa tạo xong được duyệt luôn (video cần ảnh này mới chạy được).
+     * Chạy SAU khi onGenerated đã commit, trong transaction riêng: lỗi ghi file chỉ để ảnh ở trạng thái chờ duyệt, không mất kết quả.
+     */
+    public void autoApproveIfEnabled(long jobId) {
+        try {
+            JobEntity job = jobs.findById(jobId).orElse(null);
+            if (job == null || job.getKind() != com.aifilm.automation.prompt.PromptKind.IMAGE
+                    || job.getStatus() != JobStatus.AWAITING_REVIEW) {
+                return;
+            }
+            if (projects.findById(job.getProjectId()).map(ProjectEntity::isAutoApproveImagesOn).orElse(false)) {
+                review.approve(jobId);
+            }
+        } catch (Exception e) {
+            log.warn("Job {}: tự duyệt ảnh không được ({}), để chờ duyệt tay", jobId, e.getMessage());
+        }
     }
 
     /** Tài khoản của job này còn job KHÁC đang tạo không (dữ liệu thật trong DB, không dùng bộ đếm để khỏi bị lệch). */

@@ -65,6 +65,16 @@ public class ProjectEntity {
      */
     private Boolean skipMissingRefs;
 
+    /**
+     * true: ảnh tạo xong được duyệt tự động (vào kho ảnh ngay) để video chạy liền, không đợi người duyệt.
+     * Mặc định tắt: ảnh xấu thì video cũng xấu, nên người dùng tự quyết định bật.
+     */
+    private Boolean autoApproveImages;
+
+    public boolean isAutoApproveImagesOn() {
+        return Boolean.TRUE.equals(autoApproveImages);
+    }
+
     /** Đã bỏ chế độ này: video BẮT BUỘC có đủ ảnh tham chiếu mới được tạo. Luôn false (kể cả phim cũ còn cờ trong DB). */
     public boolean isSkipMissingRefsOn() {
         return false;
