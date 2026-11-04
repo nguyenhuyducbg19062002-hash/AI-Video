@@ -88,6 +88,7 @@ class SessionRunner:
     # ---------- vòng chính ----------
     def run(self, first_job: dict) -> None:
         self._pending = [first_job]   # đã nhận từ backend nhưng chưa gửi lên Flow
+        self._started_at = self.clock()
         try:
             first = self.ops.generated_tiles()
             self.anchor = first[0].key if first else None
@@ -123,6 +124,8 @@ class SessionRunner:
                 self.ops.submit(job)
             except (QuotaExceeded, BotSuspected) as e:
                 self._claiming = False
+                if isinstance(e, BotSuspected):
+                    e = BotSuspected(f"{e}{self._since_start()}")
                 self._finish(job, e)
                 return
             except _FATAL as e:
@@ -191,12 +194,18 @@ class SessionRunner:
         self._check_page_error()
         return True
 
+    def _since_start(self) -> str:
+        """Đo để biết tài khoản làm được bao lâu / bao nhiêu lệnh thì bị Flow báo: ghi vào thông báo lỗi (hiện ở trang Tài khoản)."""
+        started = getattr(self, "_started_at", None)
+        minutes = (self.clock() - started) / 60 if started is not None else 0.0
+        return f" [sau {minutes:.1f} phút, đã gửi {self.submitted} lệnh trong phiên]"
+
     def _tile_error(self, text: str) -> WorkerError:
         """Ô Flow báo Failed. "unusual activity" = Flow nghi tự động hóa: dừng nhận thêm việc để tài khoản nghỉ, không đốt thêm lệnh."""
         low = (text or "").lower()
         if "unusual activity" in low or "hoạt động bất thường" in low:
             self._claiming = False
-            return BotSuspected(f"Flow nghi ngờ hoạt động tự động: {text[:200]}")
+            return BotSuspected(f"Flow nghi ngờ hoạt động tự động: {text[:200]}{self._since_start()}")
         if any(w in low for w in ("not enough credits", "out of credits", "hết tín dụng")):
             self._claiming = False
             return QuotaExceeded(f"Flow báo: {text[:200]}")
@@ -219,7 +228,7 @@ class SessionRunner:
             self._finish(slot.job, QuotaExceeded(f"Flow báo: {text}"), slot)
         elif kind == "suspicious":
             self._claiming = False   # tài khoản đang bị Flow nghi ngờ: không gửi thêm, backend cho nghỉ và đổi sang tài khoản khác
-            self._finish(slot.job, BotSuspected(f"Flow nghi ngờ hoạt động tự động: {text}"), slot)
+            self._finish(slot.job, BotSuspected(f"Flow nghi ngờ hoạt động tự động: {text}{self._since_start()}"), slot)
         else:
             self._finish(slot.job, Rejected(f"Flow từ chối: {text}"), slot)
 
