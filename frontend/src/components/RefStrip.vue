@@ -9,10 +9,13 @@
             class="w-full h-full object-cover cursor-zoom-in" @click="$emit('zoom', r.id)" :alt="r.id" />
           <!-- Ảnh app sẽ tạo (ví dụ PANEL-1 từ prompt-anh-panel.xlsx): không phải lỗi, chỉ là chưa tới lượt -->
           <button v-else-if="r.producerStatus" type="button" @click="$emit('goto', r.id)"
-            :title="`${r.id} là ảnh app sẽ tạo ở tab Tạo ảnh (${producerLabel(r.producerStatus)}). Bấm để xem.`"
+            :title="isScene(r.id)
+              ? `${r.id} là KHUNG CẢNH (tờ 4 khung hình của cảnh này) app sẽ tạo ở tab Tạo ảnh (${producerLabel(r.producerStatus)}). Bấm để xem.`
+              : `${r.id} là ảnh app sẽ tạo ở tab Tạo ảnh (${producerLabel(r.producerStatus)}). Bấm để xem.`"
             class="w-full h-full flex flex-col items-center justify-center text-indigo-600 text-[10px] leading-tight text-center px-1 hover:bg-indigo-100">
-            <ImagePlus class="w-4 h-4 mb-0.5" />
-            <span class="font-semibold">{{ r.id.startsWith('PANEL-') ? 'Ảnh panel' : 'Ảnh sẽ tạo' }}</span>
+            <Film v-if="isScene(r.id)" class="w-4 h-4 mb-0.5" />
+            <ImagePlus v-else class="w-4 h-4 mb-0.5" />
+            <span class="font-semibold">{{ isScene(r.id) ? 'Khung cảnh' : 'Ảnh sẽ tạo' }}</span>
             <span class="opacity-80">{{ producerLabel(r.producerStatus) }}</span>
           </button>
           <div v-else class="w-full h-full flex flex-col items-center justify-center text-rose-500 text-[10px] leading-tight text-center px-1">
@@ -40,7 +43,9 @@
       Cảnh này có {{ job.references.length }} ảnh; Google Flow nhận tối đa 7 ảnh cho một lần tạo.
     </p>
     <p v-if="toCreate.length" class="text-[11px] text-indigo-600 mt-1">
-      Chờ {{ toCreate.join(', ') }}: ảnh này được tạo ở tab <b>Tạo ảnh</b> (từ file prompt ảnh). Duyệt xong ảnh đó thì cảnh này tự chạy.
+      Chờ {{ toCreate.join(', ') }}:
+      {{ toCreate.every(isScene) ? 'khung cảnh này (tờ 4 khung hình)' : toCreate.some(isScene) ? 'khung cảnh và ảnh này' : 'ảnh này' }}
+      được tạo ở tab <b>Tạo ảnh</b> (từ file prompt ảnh). Duyệt xong thì cảnh này tự chạy.
     </p>
     <p v-if="missing.length" class="text-[11px] text-rose-600 mt-1">
       Thiếu {{ missing.join(', ') }}: không có prompt tạo ảnh này và chưa có file. Bấm "Thêm ảnh có sẵn" hoặc nút "+".
@@ -50,7 +55,7 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import { ImageOff, ImagePlus, Plus, X } from 'lucide-vue-next'
+import { Film, ImageOff, ImagePlus, Plus, X } from 'lucide-vue-next'
 import { projectsApi, promptsApi, errMsg } from '@/api'
 import { store } from '@/store'
 
@@ -66,6 +71,9 @@ const uploading = ref(false)
 // chưa có ảnh nhưng app sẽ tạo (có prompt ở tab Tạo ảnh) ≠ thiếu thật (không prompt, không file)
 const toCreate = computed(() => props.job.references.filter((r) => !r.available && r.producerStatus).map((r) => r.id))
 const missing = computed(() => props.job.references.filter((r) => !r.available && !r.producerStatus).map((r) => r.id))
+
+/** PANEL-n là KHUNG CẢNH (một tờ 4 khung hình của cảnh n), không phải ảnh nhân vật / bối cảnh / đồ vật */
+const isScene = (id) => String(id).startsWith('PANEL-')
 
 const PRODUCER = {
   PENDING: 'chờ tạo', GENERATING: 'đang tạo', AWAITING_REVIEW: 'chờ duyệt', APPROVED: 'đang lưu',
