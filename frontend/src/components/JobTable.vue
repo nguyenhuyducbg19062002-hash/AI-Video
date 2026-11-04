@@ -55,6 +55,8 @@
       </div>
     </div>
 
+    <PaginationBar v-if="pageCount > 1" class="mt-1" v-model:page="page" v-model:page-size="pageSize" :total="shown.length" />
+
     <div class="overflow-x-auto mt-3">
       <table class="table">
         <thead>
@@ -124,10 +126,9 @@
           </tr>
         </tbody>
       </table>
-      <div v-if="shown.length > limit" class="py-3 text-center">
-        <button @click="limit += 300" class="btn btn-sm">Hiện thêm ({{ shown.length - limit }} cảnh nữa)</button>
-      </div>
     </div>
+    <PaginationBar v-if="shown.length" v-model:page="page" v-model:page-size="pageSize" :total="shown.length" />
+    <!-- (bảng đã chia trang: chỉ vẽ một trang, nên 1000 cảnh cũng không kéo dài) -->
 
     <!-- Lịch sử một job -->
     <div v-if="history" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40" @click.self="history = null">
@@ -163,6 +164,7 @@
 import { computed, ref, watch } from 'vue'
 import { ChevronsUp, History, Image as ImageIcon, Inbox, ListChecks, Play, RotateCcw, Search, Video, X } from 'lucide-vue-next'
 import StatusBadge from './StatusBadge.vue'
+import PaginationBar from './PaginationBar.vue'
 import { jobsApi, projectsApi, errMsg } from '@/api'
 import { store } from '@/store'
 import { canRun, matchScene, parseSceneQuery } from '@/sceneFilter'
@@ -188,7 +190,16 @@ const filter = ref('all')
 const kind = ref('')
 const source = ref('')
 const q = ref('')
-const limit = ref(300)
+// phân trang: nhớ số dòng mỗi trang của người dùng (localStorage có thể bị chặn nên bọc try/catch)
+const PAGE_SIZE_KEY = 'afm.jobTable.pageSize'
+const loadPageSize = () => {
+  try {
+    const n = Number(localStorage.getItem(PAGE_SIZE_KEY))
+    return [25, 50, 100, 200].includes(n) ? n : 50
+  } catch { return 50 }
+}
+const pageSize = ref(loadPageSize())
+const page = ref(1)
 const history = ref(null)
 const selected = ref(new Set())
 const onlySelected = ref(true)
@@ -210,8 +221,15 @@ const shown = computed(() => {
   const f = filters.find((x) => x.key === filter.value)
   return f.statuses ? base.value.filter((j) => f.statuses.includes(j.status)) : base.value
 })
-const visible = computed(() => shown.value.slice(0, limit.value))
-watch([filter, kind, source, q, hideProvided], () => { limit.value = 300 })
+const pageCount = computed(() => Math.max(1, Math.ceil(shown.value.length / pageSize.value)))
+const visible = computed(() => shown.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
+// đổi bộ lọc / số dòng mỗi trang thì về trang 1; dữ liệu tải lại làm số trang giảm thì kéo trang hiện tại về trang cuối
+watch([filter, kind, source, q, hideProvided], () => { page.value = 1 })
+watch(pageSize, (n) => {
+  page.value = 1
+  try { localStorage.setItem(PAGE_SIZE_KEY, String(n)) } catch { /* không lưu được thì thôi */ }
+})
+watch(pageCount, (n) => { if (page.value > n) page.value = n })
 watch(() => props.projectId, () => { selected.value = new Set() })
 
 const allShownSelected = computed(() => shown.value.length > 0 && shown.value.every((j) => selected.value.has(j.id)))
