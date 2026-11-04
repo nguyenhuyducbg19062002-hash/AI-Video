@@ -1,5 +1,6 @@
 package com.aifilm.automation.system;
 
+import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -75,6 +76,43 @@ public class DesktopWindow {
         }
     }
 
+    /**
+     * Đóng cửa sổ app khi ứng dụng tắt (nút "Thoát ứng dụng", Stop trong IntelliJ, tắt từ nơi khác). Trang web không tự đóng
+     * được cửa sổ của chính nó, nên trước đây cửa sổ còn nằm lại với dòng "Ứng dụng đã tắt".
+     * Profile Edge của app là riêng (ui-window) nên chỉ đóng đúng cửa sổ này, không đụng Edge của người dùng.
+     */
+    @PreDestroy
+    public void closeWindow() {
+        if (!desktopMode) {
+            return;
+        }
+        // Tiến trình Edge mà Java khởi chạy chỉ là bộ khởi động và thoát ngay; cửa sổ thật là tiến trình Edge khác, và Java
+        // không đọc được dòng lệnh của nó trên Windows (ProcessHandle.info().commandLine() rỗng). Nên hỏi WMI qua PowerShell:
+        // mọi tiến trình msedge.exe có đường dẫn profile ui-window trong dòng lệnh là của cửa sổ này.
+        String profile = profileDir().toString().toLowerCase(java.util.Locale.ROOT).replace("'", "''");
+        // Không dùng dấu ngoặc kép trong lệnh: Windows bỏ chúng khi truyền tham số cho powershell.exe (-Filter thành "Invalid query")
+        String script = "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'msedge.exe' -and $_.CommandLine -and "
+                + "$_.CommandLine.ToLower().Contains('" + profile + "') } | "
+                + "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }";
+        try {
+            log.info("Đóng cửa sổ ứng dụng");
+            Process ps = new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
+                    .redirectErrorStream(true).start();
+            ps.getInputStream().transferTo(java.io.OutputStream.nullOutputStream());
+            if (!ps.waitFor(10, TimeUnit.SECONDS)) {
+                ps.destroyForcibly();
+            }
+        } catch (IOException e) {
+            log.warn("Không đóng được cửa sổ ứng dụng: {}", e.getMessage());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private static Path profileDir() {
+        return AppPaths.data().resolve("ui-window");
+    }
+
     public void heartbeat() {
         lastHeartbeat = System.currentTimeMillis();
     }
@@ -100,7 +138,7 @@ public class DesktopWindow {
 
     /** Dùng cả khi bấm đúp lần hai lúc app đã chạy: Edge chuyển yêu cầu sang cửa sổ đang mở của cùng profile. */
     public static Process launch(Path edge, String url) throws IOException {
-        Path profile = AppPaths.data().resolve("ui-window");
+        Path profile = profileDir();
         Files.createDirectories(profile);
         List<String> cmd = new ArrayList<>(List.of(
                 edge.toString(),
