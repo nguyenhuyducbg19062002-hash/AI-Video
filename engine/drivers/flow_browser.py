@@ -1197,12 +1197,13 @@ class FlowBrowserDriver:
         ids = self._ref_ids(job)
         _status(page, "Đang gõ prompt và gắn @tag…")
         try:
-            chips = self._compose_prompt(page, s, job["prompt"], ids if uploaded else [])
+            chips = self._compose_prompt(page, s, job["prompt"], ids if uploaded else [], mention_all=job["kind"] == "IMAGE")
         except PlaywrightError as e:
             log.warning("FOREGROUND: không tự điền prompt được: %s", str(e)[:200])
             _status(page, "Không tự gõ được prompt: dùng nút Copy prompt")
             return False
-        need = len({i for i in ids if ("@" + i) in job["prompt"]})
+        shown = self._mention_unmentioned_refs(job["prompt"], ids) if job["kind"] == "IMAGE" else job["prompt"]
+        need = len({i for i in ids if ("@" + i) in shown})
         ok = uploaded and chips >= need
         _status(page, ("✓ Đã điền xong prompt" + (f" + {chips} ảnh @tag" if chips else "") + ". Kiểm tra rồi bấm Tạo.")
                 if ok else f"Chỉ gắn được {chips}/{need} ảnh: gắn tay ảnh còn thiếu (thư mục ảnh đã mở)")
