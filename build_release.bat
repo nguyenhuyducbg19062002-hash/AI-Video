@@ -26,6 +26,8 @@ if not exist "%JAVA_HOME%\bin\jpackage.exe" ( echo [LOI] %JAVA_HOME% khong phai 
 rem Maven Wrapper di kem du an: khong can cai Maven (lan dau tu tai Maven ve %USERPROFILE%\.m2)
 if not defined MVN set "MVN=%ROOT%backend\mvnw.cmd"
 if not defined ISCC set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
+rem Inno Setup cai theo kieu "chi cho nguoi dung hien tai" (winget --scope user) nam o %LOCALAPPDATA%\Programs
+if not exist "%ISCC%" if exist "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" set "ISCC=%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"
 rem Duong dan du an co dau (Du an) lam Maven loi ma hoa neu khong ep UTF-8
 set "MAVEN_OPTS=-Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8"
 
