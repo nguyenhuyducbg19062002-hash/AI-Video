@@ -219,6 +219,21 @@ class SessionRunnerTest(unittest.TestCase):
         self.assertEqual(h.done, [])
         self.assertEqual([j["jobId"] for j in h.started], [1], "tài khoản bị nghi ngờ thì không nhận thêm việc")
 
+    def test_unusual_activity_message_in_chat_panel_stops_new_work_and_reports_suspicious(self):
+        # Flow tiếng Việt báo trong khung chat, không có ô lỗi trên lưới
+        h = Harness({1: 30, 2: 30, 3: 30}, [job(2), job(3)], capacity=2)
+        orig_sleep = h.clock.sleep
+
+        def sleep_and_show(s):
+            orig_sleep(s)
+            if h.clock.now > 4:
+                h.flow.page_error_value = ("suspicious", "hoạt động bất thường")
+        h.runner.sleep = sleep_and_show
+        h.run(job(1))
+        self.assertEqual([(j, type(e)) for j, e in h.failed], [(2, BotSuspected)])
+        self.assertEqual([j["jobId"] for j in h.started], [1, 2], "không nhận thêm việc sau khi bị nghi ngờ")
+        self.assertEqual([d[0] for d in h.done], [1], "lệnh đã gửi trước đó vẫn được chờ kết quả")
+
     def test_other_failed_tile_is_a_transient_error_and_session_continues(self):
         h = Harness({1: 10, 2: 10}, [job(2)], capacity=1)
         h.flow.fail_tile[1] = "Failed Something went wrong"

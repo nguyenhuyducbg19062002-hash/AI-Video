@@ -121,7 +121,7 @@ class SessionRunner:
             self.on_start(job)
             try:
                 self.ops.submit(job)
-            except QuotaExceeded as e:
+            except (QuotaExceeded, BotSuspected) as e:
                 self._claiming = False
                 self._finish(job, e)
                 return
@@ -217,6 +217,9 @@ class SessionRunner:
         if kind == "quota":
             self._claiming = False
             self._finish(slot.job, QuotaExceeded(f"Flow báo: {text}"), slot)
+        elif kind == "suspicious":
+            self._claiming = False   # tài khoản đang bị Flow nghi ngờ: không gửi thêm, backend cho nghỉ và đổi sang tài khoản khác
+            self._finish(slot.job, BotSuspected(f"Flow nghi ngờ hoạt động tự động: {text}"), slot)
         else:
             self._finish(slot.job, Rejected(f"Flow từ chối: {text}"), slot)
 

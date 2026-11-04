@@ -44,6 +44,10 @@
     "daily limit",
     "quota exceeded"
   ],
+  "suspicious_texts": [
+    "unusual activity",
+    "hoạt động bất thường"
+  ],
   "policy_texts": [
     "vi phạm chính sách",
     "không thể tạo nội dung này",

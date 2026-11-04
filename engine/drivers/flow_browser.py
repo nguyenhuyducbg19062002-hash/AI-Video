@@ -23,7 +23,7 @@ from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
 from playwright.sync_api import sync_playwright
 
-from .errors import (AccountBroken, AuthRequired, Cancelled, ConfigError, GenerationResult, PausedByUser, QuotaExceeded,
+from .errors import (AccountBroken, AuthRequired, BotSuspected, Cancelled, ConfigError, GenerationResult, PausedByUser, QuotaExceeded,
                      Rejected, TransientError, proxy_error)
 from .flow_session import SessionRunner, Tile
 from .helper_overlay import open_in_explorer, overlay_script, prepare_refs_folder
@@ -217,6 +217,8 @@ class _SessionOps:
                 return
             err = self.page_error()
             if err:
+                if err[0] == "suspicious":
+                    raise BotSuspected(f"Flow nghi ngờ hoạt động tự động: {err[1]}")
                 raise (QuotaExceeded if err[0] == "quota" else Rejected)(f"Flow báo: {err[1]}")
         raise TransientError("Flow không nhận lệnh: không thấy ô mới ở đầu lưới sau 20s")
 
@@ -232,7 +234,7 @@ class _SessionOps:
         return GenerationResult(staged_file=path, remote_ref=project_url(page.url), media_url=media_url)
 
     def page_error(self):
-        for kind, key in (("quota", "quota_texts"), ("policy", "policy_texts")):
+        for kind, key in (("suspicious", "suspicious_texts"), ("quota", "quota_texts"), ("policy", "policy_texts")):
             texts = [t for t in (self.s.get(key) or []) if not _is_todo(t)]
             if not texts:
                 continue
@@ -564,6 +566,9 @@ class FlowBrowserDriver:
 
     @classmethod
     def _raise_if_error(cls, page, s: dict):
+        hit = cls._visible_text(page, s.get("suspicious_texts"))
+        if hit:
+            raise BotSuspected(f"Flow nghi ngờ hoạt động tự động: {hit}")
         hit = cls._visible_text(page, s.get("quota_texts"))
         if hit:
             raise QuotaExceeded(f"Flow báo: {hit}")
