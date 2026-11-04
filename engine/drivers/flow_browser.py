@@ -28,6 +28,7 @@ from .errors import (AccountBroken, AuthRequired, Cancelled, ConfigError, Genera
 from .helper_overlay import open_in_explorer, overlay_script, prepare_refs_folder
 
 FLOW_URL = "https://flow.google.com/"
+DEFAULT_VIDEO_QUALITY = "720p"   # phim không đặt chất lượng thì dùng 720p; người dùng đổi ở phần Phim
 log = logging.getLogger("flow")
 
 # Khóa bắt buộc phải cấu hình cho chế độ BACKGROUND (FOREGROUND chỉ cố gắng, thiếu thì người dùng tự làm tay)
@@ -197,8 +198,8 @@ class FlowBrowserDriver:
                 # Popover bố cục tạo trực tiếp (xác nhận 2026-11-04): nhóm radio độ phân giải (360p/720p) và độ dài (4s/6s/8s/10s).
                 # Giá trị Flow không có thì giữ nguyên lựa chọn hiện tại.
                 wanted = []
-                if job.get("videoQuality"):
-                    wanted.append(("độ phân giải", rf"^\s*{re.escape(str(job['videoQuality']))}\s*$"))
+                quality = job.get("videoQuality") or DEFAULT_VIDEO_QUALITY
+                wanted.append(("độ phân giải", rf"^\s*{re.escape(str(quality))}\s*$"))
                 if job.get("durationSeconds"):
                     wanted.append(("độ dài", rf"^\s*{int(job['durationSeconds'])}\s*s\s*$"))
                 for label, pattern in wanted:
@@ -617,7 +618,7 @@ class FlowBrowserDriver:
                     page.locator(s["generate_button"]).first.click()
                     media_id = self._wait_result(page, s, before, should_stop, job["timeoutSeconds"], job["kind"])
                 staged = self._download(page, s, media_id, staging, job["externalId"], job["kind"],
-                                        job.get("videoQuality") or "720p")
+                                        job.get("videoQuality") or DEFAULT_VIDEO_QUALITY)
                 self._clear_pending(job)
                 media_url = self._media_url(page, s, media_id) if job["kind"] == "VIDEO" else None
                 return GenerationResult(staged_file=staged, remote_ref=project_url(page.url), media_url=media_url)
@@ -669,7 +670,7 @@ class FlowBrowserDriver:
         page.goto(grid, wait_until="domcontentloaded")
         page.wait_for_timeout(5_000)
         media_id = self._wait_result(page, s, before, should_stop, job["timeoutSeconds"], "VIDEO")
-        staged = self._download(page, s, media_id, staging, job["externalId"], "VIDEO", job.get("videoQuality") or "720p")
+        staged = self._download(page, s, media_id, staging, job["externalId"], "VIDEO", job.get("videoQuality") or DEFAULT_VIDEO_QUALITY)
         self._clear_pending(job)
         return GenerationResult(staged_file=staged, remote_ref=grid, media_url=self._media_url(page, s, media_id))
 
@@ -759,7 +760,7 @@ class FlowBrowserDriver:
                             page.locator(s["generate_button"]).first.click()
                             media_id = self._wait_result(page, s, before, lambda: check() or False, job["timeoutSeconds"], job["kind"])
                         _status(page, "✓ Có ảnh, đang tải về…")
-                        self._click_download(page, s, media_id, job["kind"], job.get("videoQuality"))
+                        self._click_download(page, s, media_id, job["kind"], job.get("videoQuality") or DEFAULT_VIDEO_QUALITY)
                     except TransientError as e:
                         # chưa thấy kết quả / không bấm tải được: để người dùng tự tải trong cửa sổ này
                         log.warning("FOREGROUND %s: không tự lấy được kết quả: %s", job["externalId"], e)
