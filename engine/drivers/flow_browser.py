@@ -71,6 +71,26 @@ def _status(page, text: str):
         pass
 
 
+class StepTimer:
+    """Đo thời gian từng bước của một job để biết chỗ nào chậm. Cuối job ghi một dòng log: `[thời gian] tên=giây …`."""
+
+    def __init__(self):
+        self.t0 = time.monotonic()
+        self.steps: list[tuple[str, float]] = []
+
+    @contextmanager
+    def step(self, name: str):
+        t = time.monotonic()
+        try:
+            yield
+        finally:
+            self.steps.append((name, time.monotonic() - t))
+
+    def summary(self) -> str:
+        parts = " ".join(f"{n}={d:.1f}s" for n, d in self.steps)
+        return f"[{time.monotonic() - self.t0:.1f}s] {parts}"
+
+
 def _is_todo(v) -> bool:
     return v is None or (isinstance(v, str) and (not v.strip() or v.startswith("TODO")))
 
@@ -127,10 +147,10 @@ class FlowBrowserDriver:
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         page.set_default_timeout(45_000)
         try:
+            # Flow giữ kết nối mở nên "networkidle" luôn chạy hết giờ: chỉ chờ domcontentloaded, ô prompt được chờ riêng sau đó
             page.goto(project_url(job.get("flowProjectUrl")) or FLOW_URL, wait_until="domcontentloaded")
-            page.wait_for_load_state("networkidle", timeout=20_000)
         except PlaywrightTimeout:
-            pass  # trang Flow giữ kết nối mở lâu; domcontentloaded là đủ để tiếp tục
+            pass
         except PlaywrightError as e:
             code = proxy_error(str(e))
             if code:
@@ -182,10 +202,15 @@ class FlowBrowserDriver:
             return
         try:
             btn.last.click(timeout=5_000)
-            page.wait_for_timeout(1_000)
 
             def radio(pattern: str):
                 return page.get_by_role("radio", name=re.compile(pattern, re.I))
+
+            try:
+                page.get_by_role("radio").first.wait_for(state="visible", timeout=3_000)   # popover mở xong
+            except PlaywrightTimeout:
+                pass
+            page.wait_for_timeout(200)
 
             never = radio(s.get("agent_never_confirm") or r"^\s*(Không bao giờ|Never)(\s|$)")
             if never.count():
@@ -229,7 +254,7 @@ class FlowBrowserDriver:
         lb = page.locator(s["ingredient_listbox"])
         return lb.first.inner_text() if lb.count() else ""
 
-    def _upload_refs(self, page, s: dict, images: list[str]):
+    def _upload_refs(self, page, s: dict, images: list[str]) -> bool:
         """
         Tải lên dự án Flow những ảnh reference CHƯA có (so theo tên file; Flow giữ nguyên tên file khi tải lên).
         Nút "+" cạnh ô prompt mở bảng thành phần; "Tải nội dung nghe nhìn lên" mở hộp chọn file (chọn nhiều file một lần).
@@ -238,9 +263,13 @@ class FlowBrowserDriver:
             if not Path(img).is_file():
                 raise Rejected(f"Thiếu file ảnh reference: {img}")
         if not images:
-            return
+            return False
         page.locator(s["add_reference_button"]).first.click()
-        page.wait_for_timeout(1_200)
+        try:
+            page.locator(s["ingredient_listbox"]).first.wait_for(state="visible", timeout=4_000)
+        except PlaywrightTimeout:
+            pass
+        page.wait_for_timeout(500)   # danh sách thành phần nạp nội dung chậm hơn khung một chút
         have = self._listbox_text(page, s)
         need = [img for img in images if Path(img).name not in have]
         if need:
@@ -251,7 +280,7 @@ class FlowBrowserDriver:
             uploading = s.get("uploading_texts") or ["Đang tải lên", "Uploading"]
             deadline = time.monotonic() + 180
             while True:
-                page.wait_for_timeout(2_000)
+                page.wait_for_timeout(1_000)
                 text = self._listbox_text(page, s)
                 if not any(u in text for u in uploading) and all(Path(i).name in text for i in need):
                     break
@@ -260,7 +289,8 @@ class FlowBrowserDriver:
         else:
             log.info("Ảnh reference đã có sẵn trong dự án Flow, không tải lại")
         page.keyboard.press("Escape")
-        page.wait_for_timeout(500)
+        page.wait_for_timeout(300)
+        return bool(need)
 
     def _compose_prompt(self, page, s: dict, prompt: str, ref_ids: list[str]) -> int:
         """
@@ -286,7 +316,7 @@ class FlowBrowserDriver:
                 page.keyboard.insert_text(prompt[pos:m.start()])
             ref = m.group(1)
             page.keyboard.type("@")
-            page.wait_for_timeout(600)
+            page.wait_for_timeout(250)
             page.keyboard.insert_text(ref)
             opt = page.locator(", ".join(f"{lb.strip()} {option_sel}" for lb in s["ingredient_listbox"].split(","))).filter(
                 has=page.locator("span", has_text=re.compile(r"^\s*" + re.escape(ref) + r"\.(png|jpe?g|webp)\s*$", re.I)))
@@ -294,7 +324,7 @@ class FlowBrowserDriver:
                 opt.first.wait_for(state="visible", timeout=8_000)
                 opt.first.click()
                 chips += 1
-                page.wait_for_timeout(300)
+                page.wait_for_timeout(150)
                 self._caret_to_end(page, box)   # bố cục tạo trực tiếp: bấm chọn ảnh xong, con trỏ không về ô prompt
             except PlaywrightError:
                 # không thấy ảnh trong dự án: bỏ ô tìm kiếm, để lại chữ @ID thường
@@ -303,7 +333,7 @@ class FlowBrowserDriver:
                 page.wait_for_timeout(300)
                 self._caret_to_end(page, box, force=True)
                 page.keyboard.insert_text("@" + ref)
-            page.wait_for_timeout(200)
+            page.wait_for_timeout(100)
             pos = m.end()
         if pos < len(prompt):
             page.keyboard.insert_text(prompt[pos:])
@@ -415,7 +445,7 @@ class FlowBrowserDriver:
             edit_id = edit_media_id(page.url)
             if edit_id and edit_id not in before:
                 log.info("Flow mở màn chỉnh sửa kết quả mới: %s", edit_id)
-                page.wait_for_timeout(3_000)
+                page.wait_for_timeout(1_500)
                 return edit_id
             new = [m for m in self._media_ids(page, s, want) if m and m not in before]
             if kind == "VIDEO" and new:
@@ -432,7 +462,7 @@ class FlowBrowserDriver:
                 settled = (kind == "VIDEO" and time.monotonic() - first_seen[new[0]] > 30
                            and not self._tile_busy(page, s, new[0]))
                 if settled or self._media_ready(page, new[0]):
-                    page.wait_for_timeout(3_000 if kind == "VIDEO" else 2_000)
+                    page.wait_for_timeout(1_500 if kind == "VIDEO" else 1_000)
                     log.info("Có kết quả mới trên Flow: %s", new[0])
                     return new[0]
             elif not any_new and has_reply_sel and auto_reply and page.locator(reply_sel).count() > replies:
@@ -451,7 +481,7 @@ class FlowBrowserDriver:
             if time.monotonic() - last_log > 60:
                 log.info("Đang chờ Flow tạo...")
                 last_log = time.monotonic()
-            page.wait_for_timeout(4_000)
+            page.wait_for_timeout(1_500)
         self._log_tiles(page, s, before)
         raise TransientError(f"Quá {timeout_s}s chưa có kết quả")
 
@@ -597,33 +627,48 @@ class FlowBrowserDriver:
         s = self._sel(BACKGROUND_KEYS)
         staging = Path(job["stagingDir"])
         staging.mkdir(parents=True, exist_ok=True)
-        with self._browser(job["account"], headless=job.get("headless", False)) as ctx:
-            try:
-                page = self._open_flow(ctx, job)
-                self._ensure_project(page, job)
-                if "/project/" not in page.url:
-                    raise TransientError("Chưa vào được dự án trên Flow")
-                self._wait_prompt_box(page, s)
-                if job.get("editInstruction") and job.get("editSourceUrl"):
-                    return self._edit_on_flow(page, s, job, staging, should_stop)
-                self._apply_settings(page, s, job["kind"], job)
-                self._select_mode(page, s, job["kind"])
-                media_id = self._pending_result(page, s, job)
-                if not media_id:
-                    self._upload_refs(page, s, job["referenceImages"])
-                    page.wait_for_timeout(4_000)   # ô ảnh vừa tải lên hiện trong lưới chậm vài giây
-                    before = set(self._media_ids(page, s))
-                    self._compose_prompt(page, s, job["prompt"], self._ref_ids(job))
-                    self._save_pending(page, job, before)
-                    page.locator(s["generate_button"]).first.click()
-                    media_id = self._wait_result(page, s, before, should_stop, job["timeoutSeconds"], job["kind"])
-                staged = self._download(page, s, media_id, staging, job["externalId"], job["kind"],
-                                        job.get("videoQuality") or DEFAULT_VIDEO_QUALITY)
-                self._clear_pending(job)
-                media_url = self._media_url(page, s, media_id) if job["kind"] == "VIDEO" else None
-                return GenerationResult(staged_file=staged, remote_ref=project_url(page.url), media_url=media_url)
-            except (PlaywrightTimeout, AssertionError) as e:  # AssertionError: expect(...) hết giờ
-                raise TransientError(f"Hết thời gian chờ một phần tử trên Flow: {str(e)[:500]}") from e
+        tm = StepTimer()
+        try:
+            t_launch = time.monotonic()
+            with self._browser(job["account"], headless=job.get("headless", False)) as ctx:
+                tm.steps.append(("mo_edge", time.monotonic() - t_launch))
+                try:
+                    with tm.step("vao_du_an"):
+                        page = self._open_flow(ctx, job)
+                        self._ensure_project(page, job)
+                        if "/project/" not in page.url:
+                            raise TransientError("Chưa vào được dự án trên Flow")
+                        self._wait_prompt_box(page, s)
+                    if job.get("editInstruction") and job.get("editSourceUrl"):
+                        return self._edit_on_flow(page, s, job, staging, should_stop)
+                    with tm.step("cai_dat"):
+                        self._apply_settings(page, s, job["kind"], job)
+                        self._select_mode(page, s, job["kind"])
+                    with tm.step("kiem_tra_lan_truoc"):
+                        media_id = self._pending_result(page, s, job)
+                    if not media_id:
+                        with tm.step("upload_anh"):
+                            uploaded = self._upload_refs(page, s, job["referenceImages"])
+                            # ô ảnh vừa tải lên hiện trong lưới chậm vài giây; không upload gì thì không cần chờ
+                            page.wait_for_timeout(4_000 if uploaded else 300)
+                        before = set(self._media_ids(page, s))
+                        with tm.step("go_prompt"):
+                            self._compose_prompt(page, s, job["prompt"], self._ref_ids(job))
+                        self._save_pending(page, job, before)
+                        page.locator(s["generate_button"]).first.click()
+                        with tm.step("cho_google"):
+                            media_id = self._wait_result(page, s, before, should_stop, job["timeoutSeconds"], job["kind"])
+                    with tm.step("tai_ve"):
+                        staged = self._download(page, s, media_id, staging, job["externalId"], job["kind"],
+                                                job.get("videoQuality") or DEFAULT_VIDEO_QUALITY)
+                    self._clear_pending(job)
+                    with tm.step("lay_link_video"):
+                        media_url = self._media_url(page, s, media_id) if job["kind"] == "VIDEO" else None
+                    return GenerationResult(staged_file=staged, remote_ref=project_url(page.url), media_url=media_url)
+                except (PlaywrightTimeout, AssertionError) as e:  # AssertionError: expect(...) hết giờ
+                    raise TransientError(f"Hết thời gian chờ một phần tử trên Flow: {str(e)[:500]}") from e
+        finally:
+            log.info("Thời gian job %s %s: %s", job.get("kind"), job.get("externalId"), tm.summary())
 
     def _media_url(self, page, s: dict, media_id: str) -> str | None:
         """Địa chỉ màn chỉnh sửa của kết quả (…/project/<id>/edit/<media>): mở ô kết quả rồi đọc địa chỉ, quay lại lưới."""
@@ -797,10 +842,17 @@ class FlowBrowserDriver:
     def _enter_project(page):
         if "/project/" in page.url:
             # link đã nhớ có thể trỏ tới dự án đã bị xóa: Flow chuyển sang /404?reason=project sau khi tải trang
-            try:
-                page.wait_for_url(re.compile(r"/404"), timeout=4_000)
-            except PlaywrightTimeout:
-                return
+            # chờ tới khi ô prompt hiện (dự án còn: vào thẳng) hoặc Flow chuyển sang /404 (dự án đã xóa); tối đa 6s
+            deadline = time.monotonic() + 6
+            while "/404" not in page.url:
+                try:
+                    if page.locator("[role=textbox][contenteditable=true]").first.is_visible():
+                        return
+                except PlaywrightError:
+                    pass
+                if time.monotonic() > deadline:
+                    return
+                page.wait_for_timeout(150)
         if "/404" in page.url:
             log.info("Dự án Flow đã lưu không còn (%s): tạo dự án mới", page.url)
             page.goto(FLOW_URL, wait_until="domcontentloaded")

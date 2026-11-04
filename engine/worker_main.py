@@ -158,7 +158,7 @@ def main():
             time.sleep(3)
             continue
         if job is None:
-            time.sleep(3)
+            time.sleep(1)   # backend trả 204 ngay nên hỏi thường xuyên không tốn gì; nhận job mới nhanh hơn
             continue
         run_job(job)
 
