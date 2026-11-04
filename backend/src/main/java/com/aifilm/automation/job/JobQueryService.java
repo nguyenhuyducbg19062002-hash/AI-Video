@@ -36,7 +36,7 @@ public class JobQueryService {
 
     @Transactional(readOnly = true)
     public JobView view(long jobId) {
-        return views(List.of(jobs.findById(jobId).orElseThrow()), true).get(0);
+        return views(List.of(jobs.findById(jobId).orElseThrow()), true).stream().findFirst().orElseThrow();
     }
 
     @Transactional(readOnly = true)
@@ -108,6 +108,7 @@ public class JobQueryService {
                 .collect(Collectors.toMap(AccountEntity::getId, AccountEntity::getEmail));
 
         return list.stream()
+                .filter(j -> promptById.containsKey(j.getPromptId()))   // prompt đã bị xóa: bỏ qua job mồ côi
                 .map(j -> {
                     PromptEntity p = promptById.get(j.getPromptId());
                     PromptRevisionEntity rev = revById.get(p.getCurrentRevisionId());
