@@ -70,6 +70,8 @@ public interface JobRepository extends JpaRepository<JobEntity, Long> {
 
     List<JobEntity> findByStatusAndWorkerId(JobStatus status, String workerId);
 
+    boolean existsByAccountIdAndStatusIn(Long accountId, Collection<JobStatus> statuses);
+
     Optional<JobEntity> findByPromptId(Long promptId);
 
     List<JobEntity> findByPromptIdIn(Collection<Long> promptIds);

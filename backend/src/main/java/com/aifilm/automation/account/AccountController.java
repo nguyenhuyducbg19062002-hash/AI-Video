@@ -1,5 +1,7 @@
 package com.aifilm.automation.account;
 
+import com.aifilm.automation.job.JobRepository;
+import com.aifilm.automation.job.JobStatus;
 import com.aifilm.automation.project.Provider;
 import com.aifilm.automation.system.AppPaths;
 import com.aifilm.automation.system.DesktopWindow;
@@ -10,6 +12,8 @@ import org.springframework.web.bind.annotation.*;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 
@@ -25,6 +29,7 @@ public class AccountController {
     static final String FLOW_URL = "https://flow.google.com/";
 
     private final AccountRepository accounts;
+    private final JobRepository jobs;
 
     public record AccountForm(String email, Provider provider, String proxy, Integer priority, String notes,
                               String credentialFile, String gcpProject, String gcpLocation) {}
@@ -52,6 +57,7 @@ public class AccountController {
         a.setStatus(a.getProvider() == Provider.FLOW_BROWSER ? AccountStatus.NEED_LOGIN : AccountStatus.READY);
         accounts.save(a);
         Path profile = AppPaths.profiles().resolve("acc_" + a.getId());
+        retireProfile(profile);   // thư mục cùng tên còn sót của tài khoản đã xóa ở bản cũ
         Files.createDirectories(profile);
         a.setProfileDir(profile.toString());
         return a;
@@ -72,7 +78,25 @@ public class AccountController {
         if (a.getStatus() == AccountStatus.LEASED) {
             throw new IllegalStateException("Tài khoản đang chạy job, chờ job xong rồi xóa");
         }
-        accounts.delete(a);   // thư mục profile giữ lại trên đĩa để không mất cookie nếu xóa nhầm
+        if (jobs.existsByAccountIdAndStatusIn(id, List.of(JobStatus.GENERATING, JobStatus.DOWNLOADING))) {
+            throw new IllegalStateException("Tài khoản còn cảnh đang tạo / đang lưu, chờ xong rồi xóa");
+        }
+        // profile được đổi tên chứ không xóa (không mất cookie nếu xóa nhầm); tài khoản mới trùng id không thừa hưởng cookie
+        retireProfile(AppPaths.profiles().resolve("acc_" + id));
+        accounts.delete(a);
+    }
+
+    static void retireProfile(Path profile) {
+        if (!Files.isDirectory(profile)) {
+            return;
+        }
+        Path to = profile.resolveSibling(profile.getFileName() + "_deleted_"
+                + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS")));
+        try {
+            Files.move(profile, to);
+        } catch (IOException e) {
+            throw new IllegalStateException("Không đổi tên được thư mục profile của tài khoản: đóng cửa sổ Edge của tài khoản rồi thử lại");
+        }
     }
 
     /** Mở Edge THƯỜNG (không phải Playwright) với profile của tài khoản để người dùng tự đăng nhập Google. */
@@ -102,6 +126,9 @@ public class AccountController {
     @Transactional
     public AccountEntity confirmLogin(@PathVariable long id) {
         AccountEntity a = accounts.findById(id).orElseThrow();
+        if (a.getStatus() == AccountStatus.LEASED) {
+            throw new IllegalStateException("Tài khoản đang chạy job, chờ job xong rồi xác nhận");
+        }
         a.releaseOk();
         a.setLastErrorMessage(null);
         return a;
@@ -111,6 +138,9 @@ public class AccountController {
     @Transactional
     public AccountEntity enable(@PathVariable long id) {
         AccountEntity a = accounts.findById(id).orElseThrow();
+        if (a.getStatus() == AccountStatus.NEED_LOGIN) {
+            throw new IllegalStateException("Tài khoản cần đăng nhập: bấm \"Đăng nhập\" rồi xác nhận đã đăng nhập");
+        }
         if (a.getStatus() != AccountStatus.LEASED) {
             a.releaseOk();
             a.setCooldownUntil(null);
@@ -166,12 +196,14 @@ public class AccountController {
         if (proxy == null) {
             return null;
         }
-        if (!PROXY_PLAIN.matcher(proxy).matches() && !PROXY_URL.matcher(proxy).matches()) {
-            throw new IllegalArgumentException("Proxy \"" + (proxy.length() > 40 ? proxy.substring(0, 40) + "…" : proxy)
-                    + "\" không đúng dạng. Dùng ip:port, ip:port:user:pass hoặc http://user:pass@ip:port. Không dùng proxy thì để trống.");
+        boolean url = PROXY_URL.matcher(proxy).matches();
+        if (!url && !PROXY_PLAIN.matcher(proxy).matches()) {
+            // không nhắc lại giá trị proxy: có thể chứa mật khẩu
+            throw new IllegalArgumentException("Proxy không đúng dạng. Dùng ip:port, ip:port:user:pass hoặc http://user:pass@ip:port. Không dùng proxy thì để trống.");
         }
-        String portPart = proxy.replaceFirst("^.*?([A-Za-z0-9.-]+):(\\d{1,5}).*$", "$2");
-        int port = Integer.parseInt(portPart);
+        // host:port nằm sau "@" cuối cùng (dạng URL) hoặc ở đầu chuỗi (dạng ip:port:user:pass)
+        String hostPort = url ? proxy.substring(Math.max(proxy.indexOf("://") + 3, proxy.lastIndexOf('@') + 1)) : proxy;
+        int port = Integer.parseInt(hostPort.split("[:/]")[1]);
         if (port < 1 || port > 65535) {
             throw new IllegalArgumentException("Cổng proxy " + port + " không hợp lệ (1–65535)");
         }
