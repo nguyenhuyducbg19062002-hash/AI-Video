@@ -65,8 +65,13 @@ public class ProjectEntity {
      */
     private Boolean skipMissingRefs;
 
+    /** Đã bỏ chế độ này: video BẮT BUỘC có đủ ảnh tham chiếu mới được tạo. Luôn false (kể cả phim cũ còn cờ trong DB). */
     public boolean isSkipMissingRefsOn() {
-        return Boolean.TRUE.equals(skipMissingRefs);
+        return false;
+    }
+
+    public Boolean getSkipMissingRefs() {
+        return false;
     }
 
     /** true: chỉ chạy các cảnh người dùng chọn (run_priority > 0); chạy hết thì phim tự tạm dừng. */

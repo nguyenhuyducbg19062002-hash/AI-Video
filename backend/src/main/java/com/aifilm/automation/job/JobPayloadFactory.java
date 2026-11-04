@@ -38,7 +38,10 @@ public class JobPayloadFactory {
         // Ảnh reference theo đúng thứ tự cột Reference IDs (= thứ tự khai báo trong prompt Omni), rồi tới ảnh thêm bằng "+".
         // Áp dụng cho cả video lẫn ảnh PANEL (panel được tạo từ ảnh gốc).
         // Phim bật "Video dùng ảnh có sẵn": ảnh chưa có (panel chưa tạo…) thì bỏ qua, chỉ gắn ảnh đã có
-        boolean skipMissing = project.isSkipMissingRefsOn() && prompt.getKind() == PromptKind.VIDEO;
+        boolean skipMissing = false;   // video bắt buộc đủ ảnh tham chiếu
+        if (prompt.getKind() == PromptKind.VIDEO && references.findByVideoPromptIdOrderByOrdinalAsc(prompt.getId()).isEmpty()) {
+            throw new IllegalStateException("Video chưa có ảnh tham chiếu: phải có ảnh tham chiếu mới tạo được video");
+        }
         List<String> refs = references.findByVideoPromptIdOrderByOrdinalAsc(prompt.getId()).stream()
                 .map(r -> assets.findByProjectIdAndExternalId(project.getId(), r.getRefExternalId())
                         .map(a -> locate(a, project))

@@ -27,6 +27,7 @@ public interface JobRepository extends JpaRepository<JobEntity, Long> {
               AND (:imagesOnly = 0 OR p.kind = 'IMAGE' OR COALESCE(j.run_priority, 0) > 0)
               AND (:selectedOnly = 0 OR COALESCE(j.run_priority, 0) > 0)
               AND (:skipMissing = 0 OR p.kind = 'VIDEO' OR COALESCE(j.run_priority, 0) > 0)
+              AND (p.kind <> 'VIDEO' OR EXISTS (SELECT 1 FROM prompt_references r0 WHERE r0.video_prompt_id = p.id))
               AND ((:skipMissing = 1 AND p.kind = 'VIDEO') OR NOT EXISTS (
                   SELECT 1 FROM prompt_references r
                   WHERE r.video_prompt_id = p.id

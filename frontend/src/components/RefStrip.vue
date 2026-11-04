@@ -39,10 +39,7 @@
     <p v-if="job.references.length > 7" class="text-[11px] text-amber-600 mt-1.5">
       Cảnh này có {{ job.references.length }} ảnh; Google Flow nhận tối đa 7 ảnh cho một lần tạo.
     </p>
-    <p v-if="toCreate.length && job.kind === 'VIDEO' && store.current?.project.skipMissingRefs" class="text-[11px] text-slate-500 mt-1">
-      Phim đang bật "có ảnh sẵn thì tạo video luôn": video chạy không cần {{ toCreate.join(', ') }}.
-    </p>
-    <p v-else-if="toCreate.length" class="text-[11px] text-indigo-600 mt-1">
+    <p v-if="toCreate.length" class="text-[11px] text-indigo-600 mt-1">
       Chờ {{ toCreate.join(', ') }}: ảnh này được tạo ở tab <b>Tạo ảnh</b> (từ file prompt ảnh). Duyệt xong ảnh đó thì cảnh này tự chạy.
     </p>
     <p v-if="missing.length" class="text-[11px] text-rose-600 mt-1">

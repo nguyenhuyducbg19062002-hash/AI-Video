@@ -56,19 +56,11 @@
           </div>
         </div>
 
-        <label class="flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition"
-          :class="form.skipMissingRefs ? 'border-emerald-200 bg-emerald-50/50' : 'border-slate-200'">
-          <input type="checkbox" v-model="form.skipMissingRefs" class="mt-0.5 w-4 h-4 accent-emerald-600" />
-          <span>
-            <span class="block text-sm font-medium text-slate-700">Có ảnh sẵn thì tạo video luôn, không tạo thêm ảnh</span>
-            <span class="block text-[11px] text-slate-500 mt-0.5">
-              Bật: chỉ tạo video, dùng ảnh nhân vật / bối cảnh / đồ vật có sẵn; ảnh panel chưa có thì bỏ qua.
-              Tắt: tạo ảnh panel trước (giữ bố cục đúng kịch bản), duyệt xong mới tạo video.
-            </span>
-          </span>
-        </label>
+        <p class="text-[11px] text-slate-500 px-1">
+          Quy tắc bắt buộc: video chỉ được tạo khi ĐỦ ảnh tham chiếu (có sẵn hoặc đã duyệt). Thiếu ảnh nào thì app tạo ảnh đó trước.
+        </p>
 
-        <label v-if="!form.skipMissingRefs" class="flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition"
+        <label class="flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition"
           :class="form.waitAllImages ? 'border-indigo-200 bg-indigo-50/50' : 'border-slate-200'">
           <input type="checkbox" v-model="form.waitAllImages" class="mt-0.5 w-4 h-4 accent-indigo-600" />
           <span>

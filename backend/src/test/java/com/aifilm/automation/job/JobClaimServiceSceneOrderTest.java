@@ -85,6 +85,13 @@ class JobClaimServiceSceneOrderTest {
     }
 
     @Test
+    void videoWithoutAnyReference_neverRuns() {
+        when(jobs.findPendingVideoJobsInOrder(anyLong())).thenReturn(List.of(video2));
+        refs(11L);   // cảnh 2 không có ảnh tham chiếu nào: bắt buộc phải có ảnh mới tạo video
+        assertTrue(service.nextBySceneOrder(project).isEmpty());
+    }
+
+    @Test
     void nothingToDo_whenOnlyImagesPendingAndNoSceneNeedsThem() {
         when(jobs.findPendingVideoJobsInOrder(anyLong())).thenReturn(List.of());
         assertTrue(service.nextBySceneOrder(project).isEmpty());

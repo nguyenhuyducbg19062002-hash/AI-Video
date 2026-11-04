@@ -181,17 +181,6 @@
             <span class="text-slate-700 font-medium">Tạo video ngay khi đủ ảnh của cảnh</span>
             <span class="text-[11px] text-slate-400">{{ current.project.waitAllImages === false ? '(đang bật: không đợi duyệt hết ảnh)' : '(đang tắt: video đợi duyệt hết ảnh của phim)' }}</span>
           </label>
-          <label class="flex items-center gap-2 cursor-pointer select-none"
-            title="Bật: không tạo ảnh panel nữa; video chạy ngay với các ảnh có sẵn (nhân vật, bối cảnh, đồ vật). Ảnh còn thiếu thì bỏ qua.">
-            <button type="button" role="switch" :aria-checked="!!current.project.skipMissingRefs" @click="toggleSkipMissing" :disabled="busy"
-              :class="current.project.skipMissingRefs ? 'bg-emerald-500' : 'bg-slate-300'"
-              class="relative inline-flex h-5 w-9 shrink-0 rounded-full transition">
-              <span :class="current.project.skipMissingRefs ? 'translate-x-4' : 'translate-x-0.5'"
-                class="inline-block h-4 w-4 mt-0.5 rounded-full bg-white shadow transition"></span>
-            </button>
-            <span class="text-slate-700 font-medium">Có ảnh sẵn thì tạo video luôn, không tạo thêm ảnh</span>
-            <span class="text-[11px] text-slate-400">{{ current.project.skipMissingRefs ? '(đang bật: bỏ qua ảnh panel chưa có)' : '(đang tắt: tạo ảnh panel trước)' }}</span>
-          </label>
         </div>
         <button @click="openModal(current.project)" class="btn btn-sm ml-auto"><Pencil class="w-3.5 h-3.5" /> Sửa</button>
       </div>

@@ -76,7 +76,11 @@ public class JobClaimService {
         if (depth > 4 || !visited.add(job.getId())) {
             return Optional.empty();
         }
-        List<String> missing = references.findByVideoPromptIdOrderByOrdinalAsc(job.getPromptId()).stream()
+        List<PromptReferenceEntity> declared = references.findByVideoPromptIdOrderByOrdinalAsc(job.getPromptId());
+        if (depth == 0 && declared.isEmpty()) {
+            return Optional.empty();   // BẮT BUỘC: video phải có ảnh tham chiếu mới được tạo
+        }
+        List<String> missing = declared.stream()
                 .map(PromptReferenceEntity::getRefExternalId).filter(id -> !have.contains(id)).toList();
         if (missing.isEmpty()) {
             return Optional.of(job);
