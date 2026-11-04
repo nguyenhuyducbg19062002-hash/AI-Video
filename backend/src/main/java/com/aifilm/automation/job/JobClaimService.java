@@ -100,6 +100,40 @@ public class JobClaimService {
     /** Số video tối đa xét mỗi lần chọn việc (phim hàng nghìn cảnh không được quét hết mỗi lần claim). */
     private static final int SCENE_SCAN_LIMIT = 60;
 
+    /**
+     * Chế độ "chỉ chạy cảnh đã chọn": video bắt buộc có đủ ảnh tham chiếu, mà ảnh của chúng thường không nằm trong số cảnh được chọn.
+     * Không có bước này thì video chờ ảnh, ảnh không được chọn nên không chạy → phim đứng im. Nên chạy thêm đúng các ảnh còn thiếu
+     * của các video đã chọn (và ảnh gốc của chúng), ảnh nào nhiều video chọn cùng cần thì làm trước.
+     */
+    Optional<JobEntity> imageNeededBySelected(ProjectEntity p) {
+        Set<String> have = new HashSet<>();
+        assets.findByProjectId(p.getId()).forEach(a -> have.add(a.getExternalId()));
+        java.util.Map<Long, Integer> demand = new java.util.HashMap<>();
+        java.util.LinkedHashMap<Long, JobEntity> candidates = new java.util.LinkedHashMap<>();
+        int scanned = 0;
+        for (JobEntity video : jobs.findSelectedPendingVideoJobsInOrder(p.getId())) {
+            if (++scanned > SCENE_SCAN_LIMIT) {
+                break;
+            }
+            for (PromptReferenceEntity r : references.findByVideoPromptIdOrderByOrdinalAsc(video.getPromptId())) {
+                if (!have.contains(r.getRefExternalId())) {
+                    jobs.findImageJob(p.getId(), r.getRefExternalId())
+                            .ifPresent(producer -> demand.merge(producer.getId(), 1, Integer::sum));
+                }
+            }
+            runnableFor(video, p.getId(), have, new HashSet<>(), 0)
+                    .filter(j -> j.getKind() == PromptKind.IMAGE)
+                    .ifPresent(j -> candidates.putIfAbsent(j.getId(), j));
+        }
+        JobEntity best = null;
+        for (JobEntity c : candidates.values()) {
+            if (best == null || demand.getOrDefault(c.getId(), 0) > demand.getOrDefault(best.getId(), 0)) {
+                best = c;
+            }
+        }
+        return Optional.ofNullable(best);
+    }
+
     /** Job nên chạy để đưa `job` tiến lên: chính nó nếu đủ ảnh, ngược lại là job tạo một ảnh còn thiếu của nó. */
     private Optional<JobEntity> runnableFor(JobEntity job, long projectId, Set<String> have, Set<Long> visited, int depth) {
         if (depth > 4 || !visited.add(job.getId())) {
@@ -187,6 +221,9 @@ public class JobClaimService {
             }
         } else {
             next = jobs.findNextRunnable(p.getId(), imagesOnly ? 1 : 0, p.isSelectedOnlyOn() ? 1 : 0, p.isSkipMissingRefsOn() ? 1 : 0);
+            if (next.isEmpty() && p.isSelectedOnlyOn()) {
+                next = imageNeededBySelected(p);
+            }
         }
         if (next.isEmpty() && p.isSelectedOnlyOn() && jobs.countSelectedLeft(p.getId()) == 0) {
             p.setSelectedOnly(false);

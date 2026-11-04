@@ -99,6 +99,19 @@ class JobClaimServiceSceneOrderTest {
     }
 
     @Test
+    void selectedVideosMissingImages_runTheirImagesInsteadOfDeadlocking() {
+        // người dùng chọn 2 video; ảnh PANEL-1 của video 1 không được chọn nhưng phải tạo trước thì video mới chạy được
+        when(jobs.findSelectedPendingVideoJobsInOrder(1L)).thenReturn(List.of(video1, video2));
+        assertEquals(200L, service.imageNeededBySelected(project).orElseThrow().getId());
+    }
+
+    @Test
+    void selectedVideosWithAllImages_needNoExtraImage() {
+        when(jobs.findSelectedPendingVideoJobsInOrder(1L)).thenReturn(List.of(video2));
+        assertTrue(service.imageNeededBySelected(project).isEmpty());
+    }
+
+    @Test
     void videoWithoutAnyReference_neverRuns() {
         when(jobs.findPendingVideoJobsInOrder(anyLong())).thenReturn(List.of(video2));
         refs(11L);   // cảnh 2 không có ảnh tham chiếu nào: bắt buộc phải có ảnh mới tạo video

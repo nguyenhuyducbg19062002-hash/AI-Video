@@ -47,6 +47,14 @@ public interface JobRepository extends JpaRepository<JobEntity, Long> {
             ORDER BY COALESCE(p.source_order, 0), p.seq_no""", nativeQuery = true)
     List<JobEntity> findPendingVideoJobsInOrder(@Param("projectId") long projectId);
 
+    /** Video PENDING mà người dùng đã chọn chạy (run_priority > 0), cảnh bấm sau chạy sau. Dùng để tìm ảnh còn thiếu của chúng. */
+    @Query(value = """
+            SELECT j.* FROM jobs j
+            JOIN prompts p ON p.id = j.prompt_id
+            WHERE j.project_id = :projectId AND j.status = 'PENDING' AND p.kind = 'VIDEO' AND COALESCE(j.run_priority, 0) > 0
+            ORDER BY j.run_priority DESC, COALESCE(p.source_order, 0), p.seq_no""", nativeQuery = true)
+    List<JobEntity> findSelectedPendingVideoJobsInOrder(@Param("projectId") long projectId);
+
     @Query("select count(j) from JobEntity j where j.projectId = :projectId and j.runPriority > 0 "
             + "and j.status in (com.aifilm.automation.job.JobStatus.PENDING, com.aifilm.automation.job.JobStatus.GENERATING)")
     long countSelectedLeft(@Param("projectId") Long projectId);
