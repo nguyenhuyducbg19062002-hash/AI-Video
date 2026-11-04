@@ -323,8 +323,23 @@ public class OmniImportService {
         int fromTags = 0;
         int mismatch = 0;
         List<String> examples = new ArrayList<>();
+        Set<String> knownImages = new HashSet<>();   // ảnh đã biết của phim: để nhận ra ID viết trần trong prompt ảnh biến thể
+        if (kind == PromptKind.IMAGE) {
+            input.forEach(l -> knownImages.add(l.id()));
+            prompts.findByProjectId(projectId).stream().filter(p -> p.getKind() == PromptKind.IMAGE)
+                    .forEach(p -> knownImages.add(p.getExternalId()));
+            assets.findByProjectId(projectId).forEach(a -> knownImages.add(a.getExternalId()));
+        }
         for (Line r : input) {
             List<String> tags = PromptTags.imageIds(r.prompt());
+            if (r.refs().isEmpty() && tags.isEmpty() && kind == PromptKind.IMAGE) {
+                List<String> bare = PromptTags.bareKnownIds(r.prompt(), knownImages, r.id());
+                if (!bare.isEmpty()) {
+                    rows.add(new Line(r.order(), r.id(), r.prompt(), bare, r.note()));
+                    fromTags++;
+                    continue;
+                }
+            }
             if (r.refs().isEmpty() && !tags.isEmpty()) {
                 rows.add(new Line(r.order(), r.id(), r.prompt(), tags, r.note()));
                 fromTags++;

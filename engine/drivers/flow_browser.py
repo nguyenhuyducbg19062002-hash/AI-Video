@@ -208,7 +208,7 @@ class _SessionOps:
         before = self.generated_tiles()
         before_top = before[0] if before else None
         before_labels = {t.label for t in before[:5]}
-        d._compose_prompt(page, s, job["prompt"], d._ref_ids(job))
+        d._compose_prompt(page, s, job["prompt"], d._ref_ids(job), mention_all=job["kind"] == "IMAGE")
         page.locator(s["generate_button"]).first.click()
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
@@ -473,7 +473,7 @@ class FlowBrowserDriver:
         page.wait_for_timeout(300)
         return bool(need)
 
-    def _compose_prompt(self, page, s: dict, prompt: str, ref_ids: list[str]) -> int:
+    def _compose_prompt(self, page, s: dict, prompt: str, ref_ids: list[str], mention_all: bool = False) -> int:
         """
         Gõ prompt vào ô của Flow; mỗi "@ID" của ảnh reference thành chip mention: gõ "@", gõ ID, bấm đúng mục có tên
         file "ID.png/.jpg" (không bấm Enter: "CHAR-CALEB-1" sẽ khớp nhầm "CHAR-CALEB-10"). Trả về số chip đã chèn.
@@ -486,6 +486,8 @@ class FlowBrowserDriver:
         page.keyboard.press("Control+A")
         page.keyboard.press("Delete")
         ids = sorted({i for i in ref_ids if i}, key=len, reverse=True)
+        if mention_all:   # chỉ prompt ảnh (biến thể trang phục): prompt video giữ nguyên như cũ
+            prompt = self._mention_unmentioned_refs(prompt, ids)
         if not ids:
             page.keyboard.insert_text(prompt)
             return 0
@@ -520,6 +522,24 @@ class FlowBrowserDriver:
             page.keyboard.insert_text(prompt[pos:])
         log.info("Đã gõ prompt (%d ký tự), chèn %d chip @tag", len(prompt), chips)
         return chips
+
+    @staticmethod
+    def _mention_unmentioned_refs(prompt: str, ids: list[str]) -> str:
+        """
+        Flow chỉ dùng ảnh đã được @-mention trong ô prompt (ảnh chỉ nằm trong thư viện dự án thì Flow trả lời "tôi cần ảnh gốc,
+        hãy @ ảnh đó"). Prompt biến thể trang phục nhắc ảnh gốc bằng ID trần ("…reference image CHAR-CLARA-1…"): biến lần nhắc
+        đầu tiên thành @ID; nếu prompt không nhắc ID nào thì thêm @ID vào cuối.
+        """
+        for ref in ids:
+            tag = re.compile(r"@" + re.escape(ref) + r"(?![A-Za-z0-9_-])")
+            if tag.search(prompt):
+                continue
+            bare = re.compile(r"(?<![@A-Za-z0-9_-])" + re.escape(ref) + r"(?![A-Za-z0-9_-])")
+            if bare.search(prompt):
+                prompt = bare.sub("@" + ref, prompt, count=1)
+            else:
+                prompt = prompt.rstrip() + " @" + ref
+        return prompt
 
     @staticmethod
     def _caret_to_end(page, box, force: bool = False):
@@ -835,7 +855,7 @@ class FlowBrowserDriver:
                             page.wait_for_timeout(4_000 if uploaded else 300)
                         before = set(self._media_ids(page, s))
                         with tm.step("go_prompt"):
-                            self._compose_prompt(page, s, job["prompt"], self._ref_ids(job))
+                            self._compose_prompt(page, s, job["prompt"], self._ref_ids(job), mention_all=job["kind"] == "IMAGE")
                         self._save_pending(page, job, before)
                         page.locator(s["generate_button"]).first.click()
                         with tm.step("cho_google"):

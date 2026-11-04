@@ -38,6 +38,28 @@ public final class PromptTags {
         return new ArrayList<>(ids);
     }
 
+    /** ID viết trần, không có "@": "…the supplied reference image CHAR-CLARA-1, in the outfit…". */
+    private static final Pattern BARE_ID = Pattern.compile("(?<![@A-Za-z0-9_-])([A-Za-z][A-Za-z0-9_]*(?:-[A-Za-z0-9_]+)+)(?![A-Za-z0-9_-])");
+
+    /**
+     * Prompt ảnh "biến thể trang phục" nhắc ảnh gốc bằng ID trần (không @, không cột Reference IDs). Chỉ lấy những ID là ảnh đã biết
+     * của phim (known) và khác chính ảnh đang tạo, theo thứ tự gặp đầu tiên.
+     */
+    public static List<String> bareKnownIds(String prompt, Set<String> known, String selfId) {
+        if (prompt == null || known.isEmpty()) {
+            return List.of();
+        }
+        Set<String> out = new LinkedHashSet<>();
+        Matcher m = BARE_ID.matcher(prompt);
+        while (m.find()) {
+            String id = m.group(1);
+            if (known.contains(id) && !id.equals(selfId)) {
+                out.add(id);
+            }
+        }
+        return new ArrayList<>(out);
+    }
+
     /** Số STT ở đầu prompt, hoặc null nếu không có. */
     public static Integer leadingNumber(String prompt) {
         if (prompt == null) {
