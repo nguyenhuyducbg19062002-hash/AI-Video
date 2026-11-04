@@ -163,7 +163,7 @@ class FlowBrowserDriver:
         page.locator(option.replace("{seconds}", str(seconds))).first.click()
 
     @staticmethod
-    def _apply_settings(page, s: dict, kind: str):
+    def _apply_settings(page, s: dict, kind: str, job: dict | None = None):
         """
         Bảng cài đặt cạnh ô prompt. Flow có 2 bố cục:
         - Tác nhân (bảng chat bên phải): "Xác nhận trước khi tạo" → "Không bao giờ" (Tác nhân khỏi hỏi lại), số bản tạo
@@ -193,6 +193,21 @@ class FlowBrowserDriver:
             if mode.count():
                 mode.first.click(timeout=5_000)
                 page.wait_for_timeout(300)
+            if kind == "VIDEO" and job:
+                # Popover bố cục tạo trực tiếp (xác nhận 2026-11-04): nhóm radio độ phân giải (360p/720p) và độ dài (4s/6s/8s/10s).
+                # Giá trị Flow không có thì giữ nguyên lựa chọn hiện tại.
+                wanted = []
+                if job.get("videoQuality"):
+                    wanted.append(("độ phân giải", rf"^\s*{re.escape(str(job['videoQuality']))}\s*$"))
+                if job.get("durationSeconds"):
+                    wanted.append(("độ dài", rf"^\s*{int(job['durationSeconds'])}\s*s\s*$"))
+                for label, pattern in wanted:
+                    opt = radio(pattern)
+                    if opt.count():
+                        opt.first.click(timeout=5_000)
+                        page.wait_for_timeout(300)
+                    else:
+                        log.warning("Flow không có lựa chọn %s %s: giữ mặc định", label, pattern)
             x1 = radio(r"^\s*x1\s*$")
             if x1.count():
                 # bố cục Tác nhân có 2 nhóm x1: nhóm đầu cho ảnh, nhóm sau cho video
@@ -590,9 +605,8 @@ class FlowBrowserDriver:
                 self._wait_prompt_box(page, s)
                 if job.get("editInstruction") and job.get("editSourceUrl"):
                     return self._edit_on_flow(page, s, job, staging, should_stop)
-                self._apply_settings(page, s, job["kind"])
+                self._apply_settings(page, s, job["kind"], job)
                 self._select_mode(page, s, job["kind"])
-                self._select_duration(page, s, job)
                 media_id = self._pending_result(page, s, job)
                 if not media_id:
                     self._upload_refs(page, s, job["referenceImages"])
@@ -822,9 +836,8 @@ class FlowBrowserDriver:
 
     def _prefill_steps(self, page, s: dict, job: dict) -> bool:
         uploaded = True
-        for name, step in [("đặt cài đặt x1", lambda: self._apply_settings(page, s, job["kind"])),
+        for name, step in [("đặt cài đặt (x1, độ dài, độ phân giải)", lambda: self._apply_settings(page, s, job["kind"], job)),
                            ("chọn chế độ", lambda: self._select_mode(page, s, job["kind"])),
-                           ("chọn độ dài video", lambda: self._select_duration(page, s, job)),
                            ("upload ảnh reference", lambda: self._upload_refs(page, s, job["referenceImages"]))]:
             _status(page, "Đang " + name + "…")
             try:
