@@ -15,6 +15,8 @@ export const projectsApi = {
   create: (form) => data(http.post('/projects', form)),
   update: (id, form) => data(http.put(`/projects/${id}`, form)),
   remove: (id) => data(http.delete(`/projects/${id}`)),
+  /** Quét thư mục tổng của một tập: trả về thư mục Excel / ảnh / video để điền sẵn form (chưa tạo gì trên đĩa) */
+  scanFolder: (path) => data(http.post('/projects/scan-folder', { path })),
   importPrompts: (id) => data(http.post(`/projects/${id}/import`)),
   start: (id) => data(http.post(`/projects/${id}/start`)),
   pause: (id) => data(http.post(`/projects/${id}/pause`)),

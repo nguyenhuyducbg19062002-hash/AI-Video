@@ -202,6 +202,9 @@ public class ProjectService {
         p.setSourceDir(f.sourceDir() == null ? "" : f.sourceDir().trim());
         p.setImageDir(f.imageDir().trim());
         p.setVideoDir(f.videoDir().trim());
+        // thư mục chưa có thì tạo luôn, người dùng không phải tự tay tạo rồi gán
+        ensureDir(p.getImageDir(), "Folder Ảnh");
+        ensureDir(p.getVideoDir(), "Folder Video");
         if (f.runMode() != null) p.setRunMode(f.runMode());
         if (f.provider() != null) p.setProvider(f.provider());
         p.setFlowProjectUrl(f.flowProjectUrl() == null || f.flowProjectUrl().isBlank() ? null : f.flowProjectUrl().trim());
@@ -242,6 +245,18 @@ public class ProjectService {
                 .count();
         return new ProjectView(p, counts, total, imageJobs.size(), imagesDone, ready,
                 assets.findByProjectId(p.getId()).size(), importer.missingRefs(p.getId()));
+    }
+
+    private static void ensureDir(String dir, String label) {
+        try {
+            Path path = Path.of(dir);
+            if (!Files.isDirectory(path)) {
+                Files.createDirectories(path);
+                log.info("Đã tạo {}: {}", label, path);
+            }
+        } catch (java.io.IOException | java.nio.file.InvalidPathException | UnsupportedOperationException e) {
+            throw new IllegalArgumentException("Không tạo được " + label + " \"" + dir + "\": " + e.getMessage());
+        }
     }
 
     private static void require(String v, String label) {

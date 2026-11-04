@@ -41,6 +41,17 @@ public class ProjectController {
         return service.get(id);
     }
 
+    public record ScanRequest(String path) {}
+
+    /** Quét thư mục tổng của một tập: trả về thư mục Excel / ảnh / video để điền sẵn form (chưa tạo gì trên đĩa). */
+    @PostMapping("/scan-folder")
+    public ProjectFolderScanner.Scan scanFolder(@RequestBody ScanRequest req) {
+        if (req == null || req.path() == null || req.path().isBlank()) {
+            throw new IllegalArgumentException("Chưa chọn thư mục");
+        }
+        return ProjectFolderScanner.scan(Path.of(req.path().trim()));
+    }
+
     @PostMapping
     public ProjectView create(@RequestBody ProjectForm form) {
         return service.create(form);
