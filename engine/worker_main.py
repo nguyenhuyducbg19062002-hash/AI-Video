@@ -20,7 +20,7 @@ if str(ENGINE_DIR) not in sys.path:
 
 import requests  # noqa: E402
 
-from drivers.errors import ConfigError, WorkerError  # noqa: E402
+from drivers.errors import ConfigError, TransientError, WorkerError  # noqa: E402
 
 API = os.environ.get("AFM_API", "http://127.0.0.1:8080/api/worker")
 WORKER_ID = os.environ.get("AFM_WORKER_ID", f"py-{os.getpid()}")
@@ -77,8 +77,9 @@ class Heartbeat:
                 if resp and resp.get("cancel"):
                     self.cancelled.set()
             except requests.HTTPError as e:
-                if e.response is not None and e.response.status_code == 409:
-                    log.warning("Job %s đã bị backend thu hồi; dừng", self.job_id)
+                if e.response is not None and e.response.status_code in (401, 409):
+                    log.warning("Job %s đã bị backend thu hồi hoặc backend đã khởi động lại (%s); dừng", self.job_id,
+                                e.response.status_code)
                     self.cancelled.set()
                 else:
                     log.warning("heartbeat lỗi: %s", e)
@@ -120,20 +121,26 @@ def _report_project(job_id: int, url: str):
 
 
 def run_job(job: dict):
-    job_id = job["jobId"]
-    log.info("Job %s: %s %s trên %s (%s, %s)", job_id, job["kind"], job["externalId"],
-             job["account"]["email"], job["provider"], job["runMode"])
+    job_id = job.get("jobId")
+    if job_id is None:
+        log.error("Job không có jobId, bỏ qua: %s", sorted(job))
+        return
     with Heartbeat(job_id) as hb:
         try:
+            log.info("Job %s: %s %s trên %s (%s, %s)", job_id, job.get("kind"), job.get("externalId"),
+                     (job.get("account") or {}).get("email"), job.get("provider"), job.get("runMode"))
             driver = driver_for(job["provider"])
             # driver Flow gọi khi vừa vào / tạo dự án Flow: backend nhớ link theo (phim, tài khoản) ngay lúc đó
             job["_on_project"] = lambda url: _report_project(job_id, url)
-            if job["runMode"] == "FOREGROUND":
+            if job.get("runMode") == "FOREGROUND":
                 result = driver.generate_foreground(job, should_stop=hb.cancelled.is_set)
             else:
                 result = driver.generate(job, should_stop=hb.cancelled.is_set)
-            log.info("Job %s xong: %s", job_id, result.staged_file)
-            report(f"/jobs/{job_id}/generated", {"stagedFile": str(result.staged_file), "remoteRef": result.remote_ref,
+            staged = Path(result.staged_file)
+            if not staged.is_file() or staged.stat().st_size == 0:
+                raise TransientError(f"File kết quả không tồn tại hoặc rỗng: {staged.name}")
+            log.info("Job %s xong: %s", job_id, staged)
+            report(f"/jobs/{job_id}/generated", {"stagedFile": str(staged), "remoteRef": result.remote_ref,
                                                  "mediaUrl": getattr(result, "media_url", None)})
         except WorkerError as e:
             log.warning("Job %s: %s %s", job_id, e.code, e)
