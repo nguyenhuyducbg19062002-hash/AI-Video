@@ -45,7 +45,7 @@ class JobClaimServiceSceneOrderTest {
         panel1 = job(200L, 20L, PromptKind.IMAGE);   // PANEL-1 tạo từ CHAR-A
         charB = job(201L, 21L, PromptKind.IMAGE);
 
-        when(jobs.findPendingVideoJobsInOrder(1L)).thenReturn(List.of(video1, video2));
+        when(jobs.findOpenVideoJobsInOrder(1L)).thenReturn(List.of(video1, video2));
         when(jobs.findImageJob(eq(1L), eq("PANEL-1"))).thenReturn(Optional.of(panel1));
         when(assets.findByProjectId(1L)).thenReturn(List.of(asset("CHAR-A")));
         refs(10L, "CHAR-A", "PANEL-1");
@@ -60,8 +60,20 @@ class JobClaimServiceSceneOrderTest {
     }
 
     @Test
-    void imageWaitingReview_sceneWaits_nextSceneRuns() {
+    void imageWaitingReview_sceneWaits_nextSceneDoesNotStart() {
         panel1.setStatus(JobStatus.AWAITING_REVIEW);
+        assertTrue(service.nextBySceneOrder(project).isEmpty());   // xong cảnh 1 mới sang cảnh 2
+    }
+
+    @Test
+    void sceneVideoGenerating_nextSceneWaits() {
+        video1.setStatus(JobStatus.GENERATING);
+        assertTrue(service.nextBySceneOrder(project).isEmpty());
+    }
+
+    @Test
+    void sceneVideoDone_nextSceneStarts() {
+        when(jobs.findOpenVideoJobsInOrder(1L)).thenReturn(List.of(video2));
         assertEquals(101L, service.nextBySceneOrder(project).orElseThrow().getId());
     }
 
@@ -85,20 +97,6 @@ class JobClaimServiceSceneOrderTest {
     }
 
     @Test
-    void imageNeededByMostVideos_isGeneratedFirst() {
-        JobEntity a = job(301L, 31L, PromptKind.IMAGE), b = job(302L, 32L, PromptKind.IMAGE), c = job(303L, 33L, PromptKind.IMAGE);
-        when(assets.findByProjectId(1L)).thenReturn(List.of());
-        when(jobs.findPendingVideoJobsInOrder(anyLong())).thenReturn(List.of(video1, video2));
-        refs(10L, "A", "B", "C");   // video 1 cần ảnh 1, 2, 3
-        refs(11L, "C");             // video 2 chỉ cần ảnh 3
-        refs(31L); refs(32L); refs(33L);
-        when(jobs.findImageJob(eq(1L), eq("A"))).thenReturn(Optional.of(a));
-        when(jobs.findImageJob(eq(1L), eq("B"))).thenReturn(Optional.of(b));
-        when(jobs.findImageJob(eq(1L), eq("C"))).thenReturn(Optional.of(c));
-        assertEquals(303L, service.nextBySceneOrder(project).orElseThrow().getId());   // ảnh C mở khóa 2 video
-    }
-
-    @Test
     void selectedVideosMissingImages_runTheirImagesInsteadOfDeadlocking() {
         // người dùng chọn 2 video; ảnh PANEL-1 của video 1 không được chọn nhưng phải tạo trước thì video mới chạy được
         when(jobs.findSelectedPendingVideoJobsInOrder(1L)).thenReturn(List.of(video1, video2));
@@ -113,14 +111,14 @@ class JobClaimServiceSceneOrderTest {
 
     @Test
     void videoWithoutAnyReference_neverRuns() {
-        when(jobs.findPendingVideoJobsInOrder(anyLong())).thenReturn(List.of(video2));
+        when(jobs.findOpenVideoJobsInOrder(anyLong())).thenReturn(List.of(video2));
         refs(11L);   // cảnh 2 không có ảnh tham chiếu nào: bắt buộc phải có ảnh mới tạo video
         assertTrue(service.nextBySceneOrder(project).isEmpty());
     }
 
     @Test
     void nothingToDo_whenOnlyImagesPendingAndNoSceneNeedsThem() {
-        when(jobs.findPendingVideoJobsInOrder(anyLong())).thenReturn(List.of());
+        when(jobs.findOpenVideoJobsInOrder(anyLong())).thenReturn(List.of());
         assertTrue(service.nextBySceneOrder(project).isEmpty());
     }
 

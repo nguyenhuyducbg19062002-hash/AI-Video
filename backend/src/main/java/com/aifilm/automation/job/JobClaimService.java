@@ -62,39 +62,50 @@ public class JobClaimService {
     Optional<JobEntity> nextBySceneOrder(ProjectEntity p) {
         Set<String> have = new HashSet<>();
         assets.findByProjectId(p.getId()).forEach(a -> have.add(a.getExternalId()));
-        // Số video đang chờ từng ảnh (khóa = job tạo ảnh): ảnh nhiều video cùng cần được làm trước để mở khóa nhiều cảnh nhất
-        java.util.Map<Long, Integer> demand = new java.util.HashMap<>();
-        java.util.LinkedHashMap<Long, JobEntity> candidates = new java.util.LinkedHashMap<>();
         int scanned = 0;
-        for (JobEntity video : jobs.findPendingVideoJobsInOrder(p.getId())) {
+        // Lần lượt từng cảnh: cảnh đầu tiên chưa xong là cảnh duy nhất được làm (ảnh của nó rồi tới video của nó).
+        // Cảnh kế tiếp chỉ bắt đầu khi video cảnh trước đã tạo xong. Không làm hàng loạt ảnh của nhiều cảnh trước.
+        for (JobEntity video : jobs.findOpenVideoJobsInOrder(p.getId())) {
             if (++scanned > SCENE_SCAN_LIMIT) {
                 break;
             }
-            for (PromptReferenceEntity r : references.findByVideoPromptIdOrderByOrdinalAsc(video.getPromptId())) {
-                if (!have.contains(r.getRefExternalId())) {
-                    jobs.findImageJob(p.getId(), r.getRefExternalId())
-                            .ifPresent(producer -> demand.merge(producer.getId(), 1, Integer::sum));
-                }
+            if (video.getStatus() == JobStatus.GENERATING) {
+                return Optional.empty();   // video của cảnh này đang tạo: chờ xong mới sang cảnh sau
             }
             Optional<JobEntity> pick = runnableFor(video, p.getId(), have, new HashSet<>(), 0);
-            if (pick.isEmpty()) {
+            if (pick.isPresent()) {
+                return pick;
+            }
+            if (waitingOnImages(video, p.getId(), have, new HashSet<>(), 0)) {
+                return Optional.empty();   // ảnh của cảnh này đang tạo / chờ duyệt: chờ, không nhảy sang cảnh khác
+            }
+            // cảnh không chạy được hẳn (thiếu ảnh mà không có prompt tạo, chưa khai báo ảnh…): bỏ qua, xét cảnh sau
+        }
+        return Optional.empty();
+    }
+
+    /** Cảnh đang chờ một ảnh đang trong quy trình (tạo / chờ duyệt / tải) - khác với cảnh bị kẹt vĩnh viễn. */
+    private boolean waitingOnImages(JobEntity job, long projectId, Set<String> have, Set<Long> visited, int depth) {
+        if (depth > 4 || !visited.add(job.getId())) {
+            return false;
+        }
+        for (PromptReferenceEntity r : references.findByVideoPromptIdOrderByOrdinalAsc(job.getPromptId())) {
+            if (have.contains(r.getRefExternalId())) {
                 continue;
             }
-            if (pick.get().getKind() == PromptKind.VIDEO) {
-                if (candidates.isEmpty()) {
-                    return pick;   // video đủ ảnh và chưa có ảnh nào cần làm trước ở các cảnh phía trước
-                }
-                break;             // ảnh của cảnh trước làm trước; video này lượt sau
+            Optional<JobEntity> producer = jobs.findImageJob(projectId, r.getRefExternalId());
+            if (producer.isEmpty()) {
+                continue;
             }
-            candidates.putIfAbsent(pick.get().getId(), pick.get());
-        }
-        JobEntity best = null;   // nhiều video chờ nhất; hòa thì giữ ảnh của cảnh sớm nhất
-        for (JobEntity c : candidates.values()) {
-            if (best == null || demand.getOrDefault(c.getId(), 0) > demand.getOrDefault(best.getId(), 0)) {
-                best = c;
+            JobStatus st = producer.get().getStatus();
+            if (st == JobStatus.GENERATING || st == JobStatus.AWAITING_REVIEW || st == JobStatus.APPROVED || st == JobStatus.DOWNLOADING) {
+                return true;
+            }
+            if (st == JobStatus.PENDING && waitingOnImages(producer.get(), projectId, have, visited, depth + 1)) {
+                return true;
             }
         }
-        return Optional.ofNullable(best);
+        return false;
     }
 
     /** Số video tối đa xét mỗi lần chọn việc (phim hàng nghìn cảnh không được quét hết mỗi lần claim). */
