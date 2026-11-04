@@ -45,7 +45,7 @@ class JobClaimServiceMoreTest {
         accounts = mock(AccountRepository.class);
         projects = mock(ProjectRepository.class);
         payloads = mock(JobPayloadFactory.class);
-        service = new JobClaimService(jobs, accounts, projects, mock(JobTransitions.class), payloads, null, null, null);
+        service = new JobClaimService(jobs, accounts, projects, mock(JobTransitions.class), payloads, mock(com.aifilm.automation.prompt.ProjectAssetRepository.class), mock(com.aifilm.automation.prompt.PromptReferenceRepository.class), null);
 
         account = new AccountEntity();
         account.setId(7L);
