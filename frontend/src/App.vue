@@ -189,6 +189,9 @@ async function quit() {
     await systemApi.shutdown()
   } finally {
     stopped.value = true
+    // Đóng cửa sổ ngay cùng lúc với app tắt. Chạy được trong cửa sổ app (Edge --app); mở bằng tab trình duyệt thường
+    // thì trình duyệt chặn, khi đó dòng "Ứng dụng đã tắt" ở trên vẫn hiện và backend cũng tự đóng cửa sổ của nó.
+    try { window.close() } catch { /* bị chặn thì thôi */ }
   }
 }
 

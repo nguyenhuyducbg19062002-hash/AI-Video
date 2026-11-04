@@ -83,11 +83,32 @@ public class DesktopWindow {
      */
     @PreDestroy
     public void closeWindow() {
-        if (!desktopMode) {
+        closeWindowAsync();
+        Process ps = closer;
+        if (ps == null) {
             return;
         }
-        // Tiến trình Edge mà Java khởi chạy chỉ là bộ khởi động và thoát ngay; cửa sổ thật là tiến trình Edge khác, và Java
-        // không đọc được dòng lệnh của nó trên Windows (ProcessHandle.info().commandLine() rỗng). Nên hỏi WMI qua PowerShell:
+        try {
+            if (!ps.waitFor(10, TimeUnit.SECONDS)) {
+                ps.destroyForcibly();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private volatile Process closer;   // lệnh PowerShell đóng cửa sổ (chỉ chạy một lần)
+
+    /**
+     * Bắt đầu đóng cửa sổ NGAY và không chờ xong: AppShutdown gọi cái này đầu tiên khi nhận lệnh thoát, để cửa sổ tắt cùng
+     * lúc với app thay vì đợi Tomcat dừng rồi mới đóng. Gọi nhiều lần cũng chỉ chạy một lần.
+     */
+    public synchronized void closeWindowAsync() {
+        if (!desktopMode || closer != null) {
+            return;
+        }
+        // Tiến trình Edge mà Java khởi chạy chỉ là bộ khởi động; cửa sổ thật là tiến trình Edge khác, và Java không đọc được
+        // dòng lệnh của nó trên Windows (ProcessHandle.info().commandLine() rỗng). Nên hỏi WMI qua PowerShell:
         // mọi tiến trình msedge.exe có đường dẫn profile ui-window trong dòng lệnh là của cửa sổ này.
         String profile = profileDir().toString().toLowerCase(java.util.Locale.ROOT).replace("'", "''");
         // Không dùng dấu ngoặc kép trong lệnh: Windows bỏ chúng khi truyền tham số cho powershell.exe (-Filter thành "Invalid query")
@@ -96,16 +117,10 @@ public class DesktopWindow {
                 + "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }";
         try {
             log.info("Đóng cửa sổ ứng dụng");
-            Process ps = new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
-                    .redirectErrorStream(true).start();
-            ps.getInputStream().transferTo(java.io.OutputStream.nullOutputStream());
-            if (!ps.waitFor(10, TimeUnit.SECONDS)) {
-                ps.destroyForcibly();
-            }
+            closer = new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
+                    .redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.DISCARD).start();
         } catch (IOException e) {
             log.warn("Không đóng được cửa sổ ứng dụng: {}", e.getMessage());
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
         }
     }
 
