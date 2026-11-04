@@ -184,6 +184,22 @@ class FlowBrowserDriver:
         page.locator(option.replace("{seconds}", str(seconds))).first.click()
 
     @staticmethod
+    def _chip_matches(btn, job: dict) -> bool:
+        """
+        Flow nhớ cài đặt theo tài khoản và hiện tóm tắt trên chip ("Video · 720p · 8s ▭ x1"). Chip đã có đủ chế độ video,
+        độ phân giải, độ dài (nếu phim đặt) và x1 thì khỏi mở popover. Không đọc được chip hoặc thiếu mục nào → đặt như thường.
+        """
+        try:
+            text = btn.last.inner_text(timeout=2_000).lower()
+        except PlaywrightError:
+            return False
+        tokens = set(re.split(r"[\s·]+", text))
+        need = ["video", str(job.get("videoQuality") or DEFAULT_VIDEO_QUALITY).lower(), "x1"]
+        if job.get("durationSeconds"):
+            need.append(f"{int(job['durationSeconds'])}s")
+        return all(n in tokens for n in need)
+
+    @staticmethod
     def _apply_settings(page, s: dict, kind: str, job: dict | None = None):
         """
         Bảng cài đặt cạnh ô prompt. Flow có 2 bố cục:
@@ -199,6 +215,9 @@ class FlowBrowserDriver:
             pass
         if btn.count() == 0:
             log.warning("Không thấy nút cài đặt cạnh ô prompt: giữ cài đặt hiện tại của Flow")
+            return
+        if kind == "VIDEO" and job and FlowBrowserDriver._chip_matches(btn, job):
+            log.info("Cài đặt Flow đã đúng (video, %s, x1): bỏ qua bước mở popover", job.get("videoQuality") or DEFAULT_VIDEO_QUALITY)
             return
         try:
             btn.last.click(timeout=5_000)
