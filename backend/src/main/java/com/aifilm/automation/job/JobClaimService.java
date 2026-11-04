@@ -100,30 +100,91 @@ public class JobClaimService {
         return Optional.empty();   // ảnh đang tạo / chờ duyệt / lỗi: cảnh chờ
     }
 
+    /**
+     * Chạy song song: worker đang giữ một phiên Flow (một tài khoản, một lần mở Edge) xin thêm một job cho CHÍNH tài khoản đó
+     * trong lúc các job trước còn đang tạo. Chỉ cấp khi:
+     *  - tài khoản còn đang LEASED và mọi job đang chạy của nó thuộc đúng worker này (phiên của worker khác thì không đụng);
+     *  - chưa đủ số lệnh cùng lúc của tài khoản (maxConcurrent) và của phim (Song song);
+     *  - job kế tiếp cùng phim (một phiên = một dự án Flow của tài khoản cho phim đó), không phải việc "Sửa trên Flow".
+     */
+    public Optional<JobPayload> claimMore(String workerId, long accountId) {
+        claimLock.lock();
+        try {
+            return tx.execute(status -> claimMoreInTx(workerId, accountId));
+        } finally {
+            claimLock.unlock();
+        }
+    }
+
+    Optional<JobPayload> claimMoreInTx(String workerId, long accountId) {
+        AccountEntity a = accounts.findById(accountId).orElse(null);
+        if (a == null || a.getStatus() != com.aifilm.automation.account.AccountStatus.LEASED) {
+            return Optional.empty();
+        }
+        List<JobEntity> mine = jobs.findByAccountIdAndStatus(accountId, JobStatus.GENERATING);
+        if (mine.isEmpty() || mine.size() >= a.effectiveMaxConcurrent()
+                || mine.stream().anyMatch(j -> !workerId.equals(j.getWorkerId()))) {
+            return Optional.empty();
+        }
+        ProjectEntity p = projects.findById(mine.get(0).getProjectId()).orElse(null);
+        if (p == null || p.getStatus() != ProjectStatus.RUNNING
+                || p.getRunMode() != com.aifilm.automation.project.RunMode.BACKGROUND
+                || (p.getProvider() != com.aifilm.automation.project.Provider.FLOW_BROWSER
+                    && p.getProvider() != com.aifilm.automation.project.Provider.FAKE)   // FAKE: để kiểm thử cả vòng không cần Google
+                || jobs.countByProjectIdAndStatus(p.getId(), JobStatus.GENERATING) >= p.effectiveParallel()) {
+            return Optional.empty();
+        }
+        Optional<JobEntity> next = pickNext(p);
+        if (next.isEmpty() || next.get().getEditInstruction() != null) {
+            return Optional.empty();
+        }
+        return Optional.of(startJob(next.get(), a, p, workerId, LocalDateTime.now()));
+    }
+
+    /** Job kế tiếp được phép chạy của một phim (đã tính thứ tự ảnh / video, chạy theo cảnh, cảnh được chọn riêng…). */
+    private Optional<JobEntity> pickNext(ProjectEntity p) {
+        boolean imagesOnly = !p.isSkipMissingRefsOn() && p.isWaitAllImagesOn() && jobs.countByProjectIdAndKindAndStatusNotIn(
+                p.getId(), PromptKind.IMAGE, List.of(JobStatus.SUCCESS, JobStatus.CANCELLED)) > 0;
+        Optional<JobEntity> next;
+        if (!p.isSkipMissingRefsOn() && !p.isWaitAllImagesOn() && !p.isSelectedOnlyOn()) {
+            // Chạy theo cảnh: cảnh người dùng bấm "Chạy cảnh này" đi trước như cũ, rồi tới từng cảnh theo thứ tự
+            next = jobs.findNextRunnable(p.getId(), 0, 1, 0);
+            if (next.isEmpty()) {
+                next = nextBySceneOrder(p);
+            }
+        } else {
+            next = jobs.findNextRunnable(p.getId(), imagesOnly ? 1 : 0, p.isSelectedOnlyOn() ? 1 : 0, p.isSkipMissingRefsOn() ? 1 : 0);
+        }
+        if (next.isEmpty() && p.isSelectedOnlyOn() && jobs.countSelectedLeft(p.getId()) == 0) {
+            p.setSelectedOnly(false);
+            p.pause("Đã chạy xong các cảnh bạn chọn");
+            log.info("Phim {}: xong các cảnh đã chọn, tạm dừng", p.getCode());
+        }
+        return next;
+    }
+
+    private JobPayload startJob(JobEntity job, AccountEntity a, ProjectEntity p, String workerId, LocalDateTime now) {
+        a.lease(job.getId(), now);
+        job.setAccountId(a.getId());
+        job.setWorkerId(workerId);
+        job.setStartedAt(now);
+        job.setHeartbeatAt(now);
+        job.setCancelRequested(false);
+        job.setErrorCode(null);
+        job.setErrorMessage(null);
+        transitions.move(job, JobStatus.GENERATING, a.getId(), "claim bởi " + workerId + " trên " + a.getEmail());
+        log.info("Job {} ({}) → {} trên {}", job.getId(), job.getKind(), workerId, a.getEmail());
+        return payloads.forGenerate(job, p, a);
+    }
+
     private Optional<JobPayload> claimInTx(String workerId) {
         LocalDateTime now = LocalDateTime.now();
         for (ProjectEntity p : projects.findByStatusOrderByIdAsc(ProjectStatus.RUNNING)) {
             if (jobs.countByProjectIdAndStatus(p.getId(), JobStatus.GENERATING) >= p.effectiveParallel()) {
                 continue;
             }
-            boolean imagesOnly = !p.isSkipMissingRefsOn() && p.isWaitAllImagesOn() && jobs.countByProjectIdAndKindAndStatusNotIn(
-                    p.getId(), PromptKind.IMAGE, List.of(JobStatus.SUCCESS, JobStatus.CANCELLED)) > 0;
-            Optional<JobEntity> next;
-            if (!p.isSkipMissingRefsOn() && !p.isWaitAllImagesOn() && !p.isSelectedOnlyOn()) {
-                // Chạy theo cảnh: cảnh người dùng bấm "Chạy cảnh này" đi trước như cũ, rồi tới từng cảnh theo thứ tự
-                next = jobs.findNextRunnable(p.getId(), 0, 1, 0);
-                if (next.isEmpty()) {
-                    next = nextBySceneOrder(p);
-                }
-            } else {
-                next = jobs.findNextRunnable(p.getId(), imagesOnly ? 1 : 0, p.isSelectedOnlyOn() ? 1 : 0, p.isSkipMissingRefsOn() ? 1 : 0);
-            }
+            Optional<JobEntity> next = pickNext(p);
             if (next.isEmpty()) {
-                if (p.isSelectedOnlyOn() && jobs.countSelectedLeft(p.getId()) == 0) {
-                    p.setSelectedOnly(false);
-                    p.pause("Đã chạy xong các cảnh bạn chọn");
-                    log.info("Phim {}: xong các cảnh đã chọn, tạm dừng", p.getCode());
-                }
                 continue;
             }
             JobEntity candidate = next.get();
@@ -135,19 +196,7 @@ public class JobClaimService {
             if (acc.isEmpty()) {
                 continue;   // job giữ PENDING; UI hiển thị "hết tài khoản"
             }
-            JobEntity job = next.get();
-            AccountEntity a = acc.get();
-            a.lease(job.getId(), now);
-            job.setAccountId(a.getId());
-            job.setWorkerId(workerId);
-            job.setStartedAt(now);
-            job.setHeartbeatAt(now);
-            job.setCancelRequested(false);
-            job.setErrorCode(null);
-            job.setErrorMessage(null);
-            transitions.move(job, JobStatus.GENERATING, a.getId(), "claim bởi " + workerId + " trên " + a.getEmail());
-            log.info("Job {} ({}) → {} trên {}", job.getId(), job.getKind(), workerId, a.getEmail());
-            return Optional.of(payloads.forGenerate(job, p, a));
+            return Optional.of(startJob(next.get(), acc.get(), p, workerId, now));
         }
         return Optional.empty();
     }

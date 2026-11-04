@@ -43,6 +43,12 @@ public class AccountEntity {
     private AccountStatus status = AccountStatus.NEED_LOGIN;
 
     private int priority = 100;
+
+    /**
+     * Số lệnh Flow chạy cùng lúc trên tài khoản này (gửi lệnh mới khi lệnh trước còn đang tạo). null = 1: chạy lần lượt như cũ.
+     * Dùng kiểu Integer (cho phép null) để cột mới thêm vào bảng đã có dữ liệu không cần giá trị mặc định.
+     */
+    private Integer maxConcurrent;
     private LocalDateTime cooldownUntil;
     private Long leasedJobId;
     private int consecutiveFailures;
@@ -77,22 +83,42 @@ public class AccountEntity {
         cooldownUntil = null;
     }
 
+    /** Số lệnh chạy cùng lúc thực sự dùng: ít nhất 1, nhiều nhất 5. */
+    public int effectiveMaxConcurrent() {
+        return maxConcurrent == null ? 1 : Math.max(1, Math.min(5, maxConcurrent));
+    }
+
     public void releaseOk() {
-        status = AccountStatus.READY;
-        leasedJobId = null;
+        releaseOk(false);
+    }
+
+    /**
+     * Một job của tài khoản vừa xong. stillBusy = tài khoản còn job khác đang chạy (chạy song song): giữ nguyên LEASED,
+     * chỉ khi job cuối xong mới về READY. Tài khoản đã bị đưa vào nghỉ / cần đăng nhập / tắt thì không bị lật về READY.
+     */
+    public void releaseOk(boolean stillBusy) {
         consecutiveFailures = 0;
+        if (status == AccountStatus.LEASED && !stillBusy) {
+            status = AccountStatus.READY;
+            leasedJobId = null;
+        }
+    }
+
+    public void releaseAfterError(String msg) {
+        releaseAfterError(msg, false);
     }
 
     /** Lỗi tạm thời: 3 lần liên tiếp thì cho nghỉ 15 phút để không đốt hết job vào một tài khoản hỏng. */
-    public void releaseAfterError(String msg) {
-        leasedJobId = null;
+    public void releaseAfterError(String msg, boolean stillBusy) {
         lastErrorMessage = msg;
         if (++consecutiveFailures >= 3) {
             status = AccountStatus.COOLDOWN;
             cooldownUntil = LocalDateTime.now().plusMinutes(15);
             consecutiveFailures = 0;
-        } else {
+            leasedJobId = null;
+        } else if (status == AccountStatus.LEASED && !stillBusy) {
             status = AccountStatus.READY;
+            leasedJobId = null;
         }
     }
 

@@ -4,7 +4,21 @@ Mục tiêu: trong lúc Flow đang tạo lệnh A, app gửi tiếp lệnh B, C�
 chuyển sang "Chờ duyệt" trước. Nhiều tài khoản cùng chạy như vậy. Thời gian chờ Google (video 5–7 phút) được chồng lên nhau
 thay vì cộng dồn.
 
-## 1. Hiện trạng
+## 0. Trạng thái triển khai
+
+| Phần | Trạng thái |
+|---|---|
+| Backend: `accounts.max_concurrent`, `POST /api/worker/claim-more`, nhả tài khoản theo số job còn chạy | Xong, có test (`JobClaimServiceMoreTest`, 11 ca) |
+| Lõi phiên `engine/drivers/flow_session.py` (gắn theo thứ tự, chống vượt số lệnh, lệch pha, hủy, quá hạn, hết lượt) | Xong, có test (`engine/tests/test_flow_session.py`, 14 ca) |
+| Driver Flow thật `FlowBrowserDriver.run_session` + `_SessionOps` | Xong, đã chạy thật trên Flow (ảnh + video, xem mục 5) |
+| Worker `run_session` (heartbeat riêng từng job, báo ngay khi xong) | Xong |
+| Driver giả (FAKE) chạy theo phiên, kiểm thử cả vòng backend + worker không cần Google | Xong (mục 5) |
+| Giao diện: ô "Số lệnh chạy cùng lúc" ở trang Tài khoản | Xong |
+| Tự đóng hộp thoại phủ (Changelog) trước khi thao tác | Xong |
+
+Mặc định `max_concurrent = 1` (chạy lần lượt như cũ): chỉ tài khoản nào bạn đặt ≥ 2 mới chạy theo phiên.
+
+## 1. Hiện trạng (trước khi có tính năng này)
 
 - Mỗi tài khoản chỉ phục vụ **một job một lúc** (`AccountEntity.leasedJobId`, nhả ngay khi job xong). Một worker Python = một
   job = một lần mở Edge → gửi → chờ → tải → báo.

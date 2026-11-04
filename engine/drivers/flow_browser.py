@@ -25,6 +25,7 @@ from playwright.sync_api import sync_playwright
 
 from .errors import (AccountBroken, AuthRequired, Cancelled, ConfigError, GenerationResult, PausedByUser, QuotaExceeded,
                      Rejected, TransientError, proxy_error)
+from .flow_session import SessionRunner, Tile
 from .helper_overlay import open_in_explorer, overlay_script, prepare_refs_folder
 
 FLOW_URL = "https://flow.google.com/"
@@ -93,6 +94,98 @@ class StepTimer:
 
 def _is_todo(v) -> bool:
     return v is None or (isinstance(v, str) and (not v.strip() or v.startswith("TODO")))
+
+
+class _SessionOps:
+    """FlowOps thật cho SessionRunner (docs/SONG-SONG.md): đọc lưới ô, gửi lệnh, tải kết quả, đọc thông báo lỗi của trang."""
+
+    # Ô do Flow TẠO RA, mới nhất ở đầu (đã kiểm chứng trên Flow thật: thứ tự ổn định, dấu gắn lên ô thì không bền).
+    # Bỏ ô ảnh người dùng tải lên: nhãn là tên file VÀ là ảnh (không phải video) đã tải xong VÀ không đang chạy. Ô đang xếp hàng /
+    # đang tạo có nhãn là prompt, mà prompt có thể kết thúc bằng một @tag ảnh ("…CHAR-X-1.png"): không được loại nhầm.
+    _TILES_JS = """([card]) => { /*KEYS*/
+        return [...document.querySelectorAll(card)].map(c => {
+            const label = (c.getAttribute('aria-label') || '').trim();
+            const txt = (c.innerText || '').replace(/\\s+/g, ' ');
+            const m = txt.match(/(\\d+) *%/);
+            const busy = !!m || !!c.querySelector('[role=progressbar], mat-progress-spinner, mat-spinner');
+            const img = c.querySelector('img');
+            const imgOk = !!(img && img.complete && img.naturalWidth > 0);
+            const isVideo = !!c.querySelector('video, flow-video-tile');
+            const uploaded = !busy && !isVideo && imgOk && /[.](png|jpe?g|webp|gif|bmp)$/i.test(label);
+            return {c, label, m, busy, imgOk, uploaded};
+        }).filter(x => !x.uploaded).map(x => {
+            const k = keyOf(x.c); if (k) x.c.setAttribute('data-afm-key', k);
+            return {key: k, label: x.label.slice(0, 120), pct: x.m ? +x.m[1] : null, busy: x.busy, imgOk: x.imgOk};
+        }); }"""
+
+    def __init__(self, driver: "FlowBrowserDriver", page, s: dict):
+        self.d, self.page, self.s = driver, page, s
+
+    def generated_tiles(self) -> list[Tile]:
+        js = self._TILES_JS.replace("/*KEYS*/", FlowBrowserDriver._TILE_KEYS_JS)   # ghép lúc gọi: lớp này khai báo trước FlowBrowserDriver
+        rows = self.page.evaluate(js, [self.s["result_card"]])
+        return [Tile(key=r["key"], label=r["label"], pct=r["pct"],
+                     ready=bool(r["key"]) and not r["busy"] and r["imgOk"]) for r in rows]
+
+    def submit(self, job: dict) -> None:
+        d, page, s = self.d, self.page, self.s
+        d._dismiss_popups(page)
+        d._apply_settings(page, s, job["kind"], job)
+        d._select_mode(page, s, job["kind"])
+        uploaded = d._upload_refs(page, s, job["referenceImages"])
+        page.wait_for_timeout(4_000 if uploaded else 300)   # ô ảnh vừa tải lên hiện trong lưới chậm vài giây
+        before = len(self.generated_tiles())
+        d._compose_prompt(page, s, job["prompt"], d._ref_ids(job))
+        page.locator(s["generate_button"]).first.click()
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:   # chỉ tính là đã gửi khi ô mới xuất hiện: giữ đúng cách gắn kết quả theo thứ tự
+            page.wait_for_timeout(300)
+            if len(self.generated_tiles()) > before:
+                return
+            err = self.page_error()
+            if err:
+                raise (QuotaExceeded if err[0] == "quota" else Rejected)(f"Flow báo: {err[1]}")
+        raise TransientError("Flow không nhận lệnh: không thấy ô mới sau 20s")
+
+    def download(self, job: dict, tile: Tile) -> GenerationResult:
+        d, page, s = self.d, self.page, self.s
+        d._dismiss_popups(page)
+        staging = Path(job["stagingDir"])
+        staging.mkdir(parents=True, exist_ok=True)
+        path = d._download(page, s, tile.key, staging, job["externalId"], job["kind"],
+                           job.get("videoQuality") or DEFAULT_VIDEO_QUALITY)
+        media_url = None
+        if job["kind"] == "VIDEO":
+            # địa chỉ màn chỉnh sửa (cho "Sửa trên Flow") không đọc được từ ô: phải mở ô rồi quay lại lưới
+            tiles_before = len(self.generated_tiles())
+            media_url = d._media_url(page, s, tile.key)
+            deadline = time.monotonic() + 10
+            while len(self.generated_tiles()) != tiles_before and time.monotonic() < deadline:
+                page.wait_for_timeout(300)   # lưới vẽ lại sau khi quay về: chờ đủ ô để không bị coi là lệch pha
+        return GenerationResult(staged_file=path, remote_ref=project_url(page.url), media_url=media_url)
+
+    def page_error(self):
+        for kind, key in (("quota", "quota_texts"), ("policy", "policy_texts")):
+            texts = [t for t in (self.s.get(key) or []) if not _is_todo(t)]
+            if not texts:
+                continue
+            # một lần đọc cho cả danh sách (get_by_text từng câu mất cả giây mỗi lần đọc)
+            hit = self.page.evaluate("""(texts) => { const t = (document.body.innerText || '').toLowerCase();
+                return texts.find(x => t.includes(x.toLowerCase())) || null; }""", texts)
+            if hit:
+                return kind, hit
+        return None
+
+    def ensure_grid(self) -> None:
+        """Flow tự mở màn chỉnh sửa khi một video xong: quay lại lưới (các ô đang tạo vẫn nằm trên máy chủ Flow)."""
+        if not edit_media_id(self.page.url):
+            return
+        log.info("Flow mở màn chỉnh sửa (%s): quay lại lưới dự án", edit_media_id(self.page.url))
+        self.page.goto(project_url(self.page.url), wait_until="domcontentloaded")
+        try:
+            self.page.locator(self.s["result_card"]).first.wait_for(state="attached", timeout=15_000)
+        except PlaywrightTimeout:
+            pass
 
 
 class FlowBrowserDriver:
@@ -243,9 +336,10 @@ class FlowBrowserDriver:
                 # Giá trị Flow không có thì giữ nguyên lựa chọn hiện tại.
                 wanted = []
                 quality = job.get("videoQuality") or DEFAULT_VIDEO_QUALITY
-                wanted.append(("độ phân giải", rf"^\s*{re.escape(str(quality))}\s*$"))
+                # \b thay cho $: nút "360p" kèm biểu tượng ⓘ nên tên đầy đủ là "360p info"
+                wanted.append(("độ phân giải", rf"^\s*{re.escape(str(quality))}\b"))
                 if job.get("durationSeconds"):
-                    wanted.append(("độ dài", rf"^\s*{int(job['durationSeconds'])}\s*s\s*$"))
+                    wanted.append(("độ dài", rf"^\s*{int(job['durationSeconds'])}\s*s\b"))
                 for label, pattern in wanted:
                     opt = radio(pattern)
                     if opt.count():
@@ -658,6 +752,7 @@ class FlowBrowserDriver:
                         if "/project/" not in page.url:
                             raise TransientError("Chưa vào được dự án trên Flow")
                         self._wait_prompt_box(page, s)
+                        self._dismiss_popups(page)   # hộp thoại phủ (ví dụ Changelog) chặn mọi cú bấm phía sau
                     if job.get("editInstruction") and job.get("editSourceUrl"):
                         return self._edit_on_flow(page, s, job, staging, should_stop)
                     with tm.step("cai_dat"):
@@ -688,6 +783,54 @@ class FlowBrowserDriver:
                     raise TransientError(f"Hết thời gian chờ một phần tử trên Flow: {str(e)[:500]}") from e
         finally:
             log.info("Thời gian job %s %s: %s", job.get("kind"), job.get("externalId"), tm.summary())
+
+    @staticmethod
+    def _dismiss_popups(page) -> bool:
+        """
+        Flow đôi khi hiện hộp thoại phủ lên trang (ví dụ "Changelog" là một iframe trong .cdk-overlay-container) làm MỌI cú bấm
+        phía sau bị chặn ("subtree intercepts pointer events"). Đóng bằng Esc, không được thì bấm nút Đóng. True nếu có hộp thoại.
+        """
+        overlay = page.locator(".cdk-overlay-container iframe, .cdk-overlay-container [role=dialog], .cdk-overlay-container mat-dialog-container")
+        try:
+            if overlay.count() == 0:
+                return False
+            for _ in range(3):
+                page.keyboard.press("Escape")
+                page.wait_for_timeout(400)
+                if overlay.count() == 0:
+                    return True
+            close = page.locator(".cdk-overlay-container").get_by_role(
+                "button", name=re.compile(r"^\s*(close|đóng|got it|dismiss|skip|no thanks|ok)\b", re.I))
+            if close.count():
+                close.first.click(timeout=3_000)
+                page.wait_for_timeout(400)
+            log.info("Đã đóng hộp thoại phủ trên Flow")
+            return True
+        except PlaywrightError as e:
+            log.warning("Không đóng được hộp thoại phủ: %s", str(e)[:150])
+            return False
+
+    def run_session(self, first_job: dict, claim_more, on_start, on_done, on_fail, stop_of) -> None:
+        """
+        Chạy SONG SONG nhiều lệnh trên tài khoản này trong một lần mở Edge (docs/SONG-SONG.md). first_job đã được backend giao;
+        claim_more() xin thêm job cho cùng tài khoản (None khi hết việc / đủ chỗ). Kết quả báo QUA callback ngay khi từng lệnh
+        xong. Lỗi trước khi phiên bắt đầu (mở Edge, vào dự án) được ném ra: worker báo lỗi cho first_job.
+        """
+        s = self._sel(BACKGROUND_KEYS)
+        capacity = int((first_job["account"] or {}).get("maxConcurrent") or 1)
+        with self._browser(first_job["account"], headless=first_job.get("headless", False)) as ctx:
+            try:
+                page = self._open_flow(ctx, first_job)
+                self._ensure_project(page, first_job)
+                if "/project/" not in page.url:
+                    raise TransientError("Chưa vào được dự án trên Flow")
+                self._wait_prompt_box(page, s)
+                page.wait_for_timeout(1_500)
+                self._dismiss_popups(page)
+            except (PlaywrightTimeout, AssertionError) as e:
+                raise TransientError(f"Hết thời gian chờ một phần tử trên Flow: {str(e)[:500]}") from e
+            log.info("Phiên Flow song song: tối đa %d lệnh cùng lúc trên %s", capacity, first_job["account"].get("email"))
+            SessionRunner(_SessionOps(self, page, s), capacity, claim_more, on_start, on_done, on_fail, stop_of).run(first_job)
 
     def _media_url(self, page, s: dict, media_id: str) -> str | None:
         """Địa chỉ màn chỉnh sửa của kết quả (…/project/<id>/edit/<media>): mở ô kết quả rồi đọc địa chỉ, quay lại lưới."""

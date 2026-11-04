@@ -3,6 +3,7 @@ package com.aifilm.automation.worker;
 import com.aifilm.automation.job.JobClaimService;
 import com.aifilm.automation.job.JobPayload;
 import com.aifilm.automation.job.JobResultService;
+import com.aifilm.automation.job.WorkerReports.ClaimMoreRequest;
 import com.aifilm.automation.job.WorkerReports.ClaimRequest;
 import com.aifilm.automation.job.WorkerReports.FailureReport;
 import com.aifilm.automation.job.WorkerReports.FlowProjectReport;
@@ -26,6 +27,12 @@ public class WorkerController {
     @PostMapping("/claim")
     public ResponseEntity<JobPayload> claim(@RequestBody ClaimRequest req) {
         return claims.claim(req.workerId()).map(ResponseEntity::ok).orElse(ResponseEntity.noContent().build());
+    }
+
+    /** Chạy song song: cấp thêm một job cho đúng tài khoản worker đang giữ phiên (204 khi hết việc hoặc đã đủ chỗ). */
+    @PostMapping("/claim-more")
+    public ResponseEntity<JobPayload> claimMore(@RequestBody ClaimMoreRequest req) {
+        return claims.claimMore(req.workerId(), req.accountId()).map(ResponseEntity::ok).orElse(ResponseEntity.noContent().build());
     }
 
     @PostMapping("/jobs/{id}/heartbeat")

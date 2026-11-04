@@ -62,7 +62,15 @@ public class JobResultService {
         job.setErrorMessage(null);
         job.setWorkerId(null);
         transitions.move(job, JobStatus.AWAITING_REVIEW, job.getAccountId(), "có kết quả, chờ duyệt");
-        accounts.findById(job.getAccountId()).ifPresent(AccountEntity::releaseOk);
+        // chạy song song: tài khoản còn job khác đang tạo thì vẫn giữ LEASED, chỉ job cuối xong mới về READY
+        boolean busy = otherJobsRunning(job);
+        accounts.findById(job.getAccountId()).ifPresent(a -> a.releaseOk(busy));
+    }
+
+    /** Tài khoản của job này còn job KHÁC đang tạo không (dữ liệu thật trong DB, không dùng bộ đếm để khỏi bị lệch). */
+    private boolean otherJobsRunning(JobEntity job) {
+        return job.getAccountId() != null
+                && jobs.countByAccountIdAndStatusAndIdNot(job.getAccountId(), JobStatus.GENERATING, job.getId()) > 0;
     }
 
     @Transactional
@@ -72,6 +80,7 @@ public class JobResultService {
         ErrorCode code = ErrorCode.parse(r.errorCode());
         job.setErrorCode(code.name());
         job.setErrorMessage(r.message());
+        boolean busy = otherJobsRunning(job);   // phải tính trước khi job bị requeue / đổi trạng thái
 
         switch (code) {
             case QUOTA_EXCEEDED -> {
@@ -84,7 +93,7 @@ public class JobResultService {
                 requeue(job, acc, "phiên đăng nhập của " + acc.getEmail() + " hỏng → xoay sang tài khoản khác");
             }
             case TRANSIENT -> {
-                acc.releaseAfterError(r.message());
+                acc.releaseAfterError(r.message(), busy);
                 job.setAttempt(job.getAttempt() + 1);
                 int max = projects.findById(job.getProjectId()).map(ProjectEntity::getMaxAttempts).orElse(3);
                 if (job.getAttempt() < max) {
@@ -94,17 +103,17 @@ public class JobResultService {
                 }
             }
             case REJECTED -> {
-                acc.releaseOk();
+                acc.releaseOk(busy);
                 fail(job, acc, "nền tảng từ chối: cần sửa prompt");
             }
             case CONFIG_ERROR -> {
-                acc.releaseOk();
+                acc.releaseOk(busy);
                 requeue(job, acc, "lỗi cấu hình worker");
                 projects.findById(job.getProjectId()).ifPresent(p -> p.pause("CONFIG_ERROR: " + r.message()));
             }
             case PAUSED -> {
                 // người dùng chủ động dừng (đóng cửa sổ Flow / nút "Tạm dừng phim"): không phải lỗi
-                acc.releaseOk();
+                acc.releaseOk(busy);
                 job.setErrorCode(null);
                 job.setErrorMessage(null);
                 requeue(job, acc, "người dùng tạm dừng: " + r.message());
@@ -119,7 +128,7 @@ public class JobResultService {
                 requeue(job, acc, "tài khoản " + acc.getEmail() + " lỗi cấu hình (" + r.message() + ") → tắt tài khoản, xoay sang tài khoản khác");
             }
             case CANCELLED -> {
-                acc.releaseOk();
+                acc.releaseOk(busy);
                 job.setWorkerId(null);
                 job.setRunPriority(null);
                 transitions.move(job, JobStatus.CANCELLED, acc.getId(), "người dùng hủy");

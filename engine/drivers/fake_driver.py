@@ -7,6 +7,8 @@ Driver GIẢ để chạy thử toàn bộ vòng: claim → staging → duyệt 
 - Prompt chứa "[fake:reject]" bị từ chối: dùng để thử nhánh FAILED → sửa prompt → tạo lại.
 """
 import hashlib
+import os
+import random
 import shutil
 import struct
 import subprocess
@@ -15,6 +17,7 @@ import zlib
 from pathlib import Path
 
 from .errors import Cancelled, GenerationResult, QuotaExceeded, Rejected
+from .flow_session import SessionRunner, Tile
 
 
 def _png(path: Path, width: int, height: int, rgb: tuple[int, int, int]):
@@ -34,7 +37,50 @@ def _color(text: str) -> tuple[int, int, int]:
     return h[0], h[1], h[2]
 
 
+class _FakeOps:
+    """FlowOps giả cho SessionRunner: mỗi lệnh "tạo" trong vài giây, nhiều lệnh chồng lên nhau, xong lệch thứ tự."""
+
+    def __init__(self, driver: "FakeDriver"):
+        self.d = driver
+        self.tiles: list[dict] = []   # mới nhất ở đầu, như lưới Flow thật
+
+    def generated_tiles(self) -> list[Tile]:
+        now = time.monotonic()
+        return [Tile(key=f"fake-{t['owner']}" if now >= t["done_at"] else None, label=t["label"],
+                     pct=None if now >= t["done_at"] else int((now - t["start"]) / (t["done_at"] - t["start"]) * 100),
+                     ready=now >= t["done_at"]) for t in self.tiles]
+
+    def submit(self, job: dict) -> None:
+        if job["account"]["email"].lower().startswith("quota"):
+            raise QuotaExceeded(f"[FAKE] {job['account']['email']} hết quota")
+        if "[fake:reject]" in job["prompt"]:
+            raise Rejected("[FAKE] prompt bị từ chối")
+        now = time.monotonic()
+        self.tiles.insert(0, {"owner": job["jobId"], "label": job["prompt"][:60], "start": now,
+                              "done_at": now + random.uniform(*self.d.seconds)})
+
+    def download(self, job: dict, tile: Tile) -> GenerationResult:
+        assert tile.key == f"fake-{job['jobId']}", f"[FAKE] gắn nhầm kết quả: job {job['jobId']} nhận {tile.key}"
+        return self.d._render(job)
+
+    def page_error(self):
+        return None
+
+    def ensure_grid(self) -> None:
+        pass
+
+
 class FakeDriver:
+    def __init__(self):
+        # thời gian "tạo" của một lệnh trong phiên song song; đổi bằng biến môi trường AFM_FAKE_SECONDS="min,max"
+        lo, _, hi = os.environ.get("AFM_FAKE_SECONDS", "3,7").partition(",")
+        self.seconds = (float(lo), float(hi or lo))
+
+    def run_session(self, first_job: dict, claim_more, on_start, on_done, on_fail, stop_of) -> None:
+        capacity = int((first_job["account"] or {}).get("maxConcurrent") or 1)
+        SessionRunner(_FakeOps(self), capacity, claim_more, on_start, on_done, on_fail, stop_of,
+                      poll_s=0.3, gap_s=0.3).run(first_job)
+
     def generate(self, job: dict, should_stop) -> GenerationResult:
         if job["account"]["email"].lower().startswith("quota"):
             raise QuotaExceeded(f"[FAKE] {job['account']['email']} hết quota")
@@ -44,7 +90,9 @@ class FakeDriver:
             if should_stop():
                 raise Cancelled("Người dùng hủy job")
             time.sleep(0.5)
+        return self._render(job)
 
+    def _render(self, job: dict) -> GenerationResult:
         staging = Path(job["stagingDir"])
         staging.mkdir(parents=True, exist_ok=True)
         color = _color(job["prompt"])

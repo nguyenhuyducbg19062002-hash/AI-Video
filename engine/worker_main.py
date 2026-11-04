@@ -20,7 +20,7 @@ if str(ENGINE_DIR) not in sys.path:
 
 import requests  # noqa: E402
 
-from drivers.errors import ConfigError, WorkerError  # noqa: E402
+from drivers.errors import ConfigError, TransientError, WorkerError  # noqa: E402
 
 API = os.environ.get("AFM_API", "http://127.0.0.1:8080/api/worker")
 WORKER_ID = os.environ.get("AFM_WORKER_ID", f"py-{os.getpid()}")
@@ -119,10 +119,91 @@ def _report_project(job_id: int, url: str):
         log.warning("Không báo được link dự án Flow: %s", e)
 
 
+def _report_generated(job: dict, result):
+    job_id = job["jobId"]
+    log.info("Job %s xong: %s", job_id, result.staged_file)
+    report(f"/jobs/{job_id}/generated", {"stagedFile": str(result.staged_file), "remoteRef": result.remote_ref,
+                                         "mediaUrl": getattr(result, "media_url", None)})
+
+
+def _report_failed(job: dict, err: Exception):
+    job_id = job["jobId"]
+    if isinstance(err, WorkerError):
+        log.warning("Job %s: %s %s", job_id, err.code, err)
+        report(f"/jobs/{job_id}/failed", {"errorCode": err.code, "message": str(err)[:1900]})
+    else:  # lỗi không lường trước: coi là tạm thời
+        log.error("Job %s lỗi bất ngờ: %s", job_id, err)
+        report(f"/jobs/{job_id}/failed", {"errorCode": "TRANSIENT", "message": f"{type(err).__name__}: {err}"[:1900]})
+
+
+def wants_session(job: dict) -> bool:
+    """Chạy song song (docs/SONG-SONG.md): tài khoản được đặt từ 2 lệnh cùng lúc trở lên, Flow, chế độ chạy ngầm, không phải sửa trên Flow."""
+    return (job["provider"] in ("FLOW_BROWSER", "FAKE") and job["runMode"] == "BACKGROUND" and not job.get("editInstruction")
+            and int((job.get("account") or {}).get("maxConcurrent") or 1) > 1)
+
+
+def run_session(first_job: dict):
+    """Một phiên Flow cho một tài khoản: nhiều job chạy chồng lên nhau, mỗi job có heartbeat riêng và được báo ngay khi xong."""
+    account_id = first_job["account"]["id"]
+    log.info("Phiên song song: job %s (%s) trên %s, tối đa %s lệnh cùng lúc", first_job["jobId"], first_job["kind"],
+             first_job["account"]["email"], first_job["account"].get("maxConcurrent"))
+    heartbeats: dict[int, Heartbeat] = {}
+    reported: set[int] = set()
+
+    def close(job):
+        hb = heartbeats.pop(job["jobId"], None)
+        if hb:
+            hb.__exit__(None, None, None)
+
+    def on_start(job):
+        job_id = job["jobId"]
+        log.info("Phiên song song: nhận job %s: %s %s", job_id, job["kind"], job["externalId"])
+        job["_on_project"] = lambda url: _report_project(job_id, url)
+        hb = Heartbeat(job_id)
+        hb.__enter__()
+        heartbeats[job_id] = hb
+
+    def on_done(job, result):
+        _report_generated(job, result)
+        reported.add(job["jobId"])
+        close(job)
+
+    def on_fail(job, err):
+        _report_failed(job, err)
+        reported.add(job["jobId"])
+        close(job)
+
+    def stop_of(job):
+        hb = heartbeats.get(job["jobId"])
+        return hb.cancelled.is_set if hb else (lambda: False)
+
+    def claim_more():
+        try:
+            return call("/claim-more", {"workerId": WORKER_ID, "accountId": account_id})
+        except requests.RequestException as e:
+            log.warning("Xin thêm job lỗi: %s", e)
+            return None
+
+    try:
+        driver_for(first_job["provider"]).run_session(first_job, claim_more, on_start, on_done, on_fail, stop_of)
+    except Exception as e:   # lỗi trước khi phiên bắt đầu (mở Edge, vào dự án): job đầu chưa được báo
+        if first_job["jobId"] not in reported:
+            _report_failed(first_job, e)
+            reported.add(first_job["jobId"])
+    finally:
+        for hb in list(heartbeats.values()):
+            hb.__exit__(None, None, None)
+        if first_job["jobId"] not in reported:   # lưới an toàn: không để job nào treo ở GENERATING
+            _report_failed(first_job, TransientError("Phiên Flow kết thúc mà chưa có kết quả"))
+
+
 def run_job(job: dict):
     job_id = job["jobId"]
     log.info("Job %s: %s %s trên %s (%s, %s)", job_id, job["kind"], job["externalId"],
              job["account"]["email"], job["provider"], job["runMode"])
+    if wants_session(job):
+        run_session(job)
+        return
     with Heartbeat(job_id) as hb:
         try:
             driver = driver_for(job["provider"])
@@ -132,15 +213,9 @@ def run_job(job: dict):
                 result = driver.generate_foreground(job, should_stop=hb.cancelled.is_set)
             else:
                 result = driver.generate(job, should_stop=hb.cancelled.is_set)
-            log.info("Job %s xong: %s", job_id, result.staged_file)
-            report(f"/jobs/{job_id}/generated", {"stagedFile": str(result.staged_file), "remoteRef": result.remote_ref,
-                                                 "mediaUrl": getattr(result, "media_url", None)})
-        except WorkerError as e:
-            log.warning("Job %s: %s %s", job_id, e.code, e)
-            report(f"/jobs/{job_id}/failed", {"errorCode": e.code, "message": str(e)[:1900]})
-        except Exception as e:  # lỗi không lường trước: coi là tạm thời
-            log.exception("Job %s lỗi bất ngờ", job_id)
-            report(f"/jobs/{job_id}/failed", {"errorCode": "TRANSIENT", "message": f"{type(e).__name__}: {e}"[:1900]})
+            _report_generated(job, result)
+        except Exception as e:
+            _report_failed(job, e)
 
 
 def main():

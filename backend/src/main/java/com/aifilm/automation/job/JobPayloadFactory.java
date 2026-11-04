@@ -58,6 +58,7 @@ public class JobPayloadFactory {
         acc.put("email", account.getEmail());
         acc.put("profileDir", account.getProfileDir());
         acc.put("proxy", account.getProxy());
+        acc.put("maxConcurrent", account.effectiveMaxConcurrent());   // chạy song song: số lệnh Flow cùng lúc của tài khoản
         acc.put("credentialFile", account.getCredentialFile());
         acc.put("gcpProject", account.getGcpProject());
         acc.put("gcpLocation", account.getGcpLocation());

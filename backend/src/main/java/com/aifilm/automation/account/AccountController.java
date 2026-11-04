@@ -27,7 +27,7 @@ public class AccountController {
     private final AccountRepository accounts;
 
     public record AccountForm(String email, Provider provider, String proxy, Integer priority, String notes,
-                              String credentialFile, String gcpProject, String gcpLocation) {}
+                              String credentialFile, String gcpProject, String gcpLocation, Integer maxConcurrent) {}
 
     @GetMapping
     public List<AccountEntity> list() {
@@ -148,6 +148,12 @@ public class AccountController {
         a.setGcpLocation(blankToNull(f.gcpLocation()));
         if (f.priority() != null) {
             a.setPriority(f.priority());
+        }
+        if (f.maxConcurrent() != null) {
+            if (f.maxConcurrent() < 1 || f.maxConcurrent() > 5) {
+                throw new IllegalArgumentException("Số lệnh chạy cùng lúc phải từ 1 đến 5");
+            }
+            a.setMaxConcurrent(f.maxConcurrent());
         }
     }
 

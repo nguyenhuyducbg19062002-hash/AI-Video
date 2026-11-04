@@ -42,6 +42,7 @@
               <td>
                 <div class="font-medium text-slate-800">{{ a.email }}</div>
                 <div v-if="a.proxy" class="text-[11px] font-mono text-indigo-600 mt-0.5">proxy {{ a.proxy }}</div>
+                <div v-if="a.maxConcurrent > 1" class="text-[11px] text-emerald-700 mt-0.5">chạy {{ a.maxConcurrent }} lệnh cùng lúc</div>
                 <div v-if="a.notes" class="text-[11px] text-slate-500 mt-0.5">{{ a.notes }}</div>
               </td>
               <td class="text-xs text-slate-600">{{ providerLabel(a.provider) }}</td>
@@ -101,6 +102,16 @@
               <input v-model.number="form.priority" type="number" class="input" />
             </div>
           </div>
+          <div v-if="form.provider === 'FLOW_BROWSER' || form.provider === 'FAKE'">
+            <label class="label">Số lệnh chạy cùng lúc (1–5)</label>
+            <input v-model.number="form.maxConcurrent" type="number" min="1" max="5" class="input !w-28" />
+            <p class="hint">
+              <b>1</b> = chạy lần lượt như cũ. Từ <b>2</b> trở lên: trong lúc Flow đang tạo lệnh này, app gửi tiếp các lệnh sau trên cùng tài khoản;
+              lệnh nào xong trước thì tải về và chuyển sang "Chờ duyệt" trước. Đã thử ổn với gói ULTRA (3 lệnh); gói khác chưa thử, nên tăng từ từ.
+              Gửi dồn nhiều lệnh một tài khoản làm hết lượt nhanh hơn và dễ bị Google để ý hơn.
+              Nhớ nâng ô "Song song" của phim (tổng số lệnh chạy cùng lúc của cả phim) cho đủ.
+            </p>
+          </div>
           <div v-if="form.provider === 'FLOW_BROWSER'">
             <label class="label">Proxy (tùy chọn, không dùng thì để trống)</label>
             <!-- name/autocomplete lạ để trình duyệt không tự điền mật khẩu đã lưu vào ô này -->
@@ -141,7 +152,7 @@ import { store } from '@/store'
 
 const showModal = ref(false)
 const editing = ref(null)
-const blank = () => ({ email: '', provider: 'FLOW_BROWSER', priority: 100, proxy: '', notes: '', credentialFile: '', gcpProject: '', gcpLocation: '' })
+const blank = () => ({ email: '', provider: 'FLOW_BROWSER', priority: 100, maxConcurrent: 1, proxy: '', notes: '', credentialFile: '', gcpProject: '', gcpLocation: '' })
 const form = ref(blank())
 
 const summary = computed(() => ['READY', 'LEASED', 'COOLDOWN', 'NEED_LOGIN', 'DISABLED']
@@ -153,6 +164,7 @@ const fmt = (s) => new Date(s).toLocaleString('vi-VN')
 function openModal(a) {
   editing.value = a
   form.value = a ? { ...blank(), ...Object.fromEntries(Object.entries(a).map(([k, v]) => [k, v ?? ''])) } : blank()
+  if (a) form.value.maxConcurrent = a.maxConcurrent || 1   // tài khoản cũ chưa có giá trị: 1 = chạy lần lượt
   showModal.value = true
 }
 

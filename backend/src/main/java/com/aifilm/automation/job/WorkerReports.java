@@ -7,6 +7,9 @@ public final class WorkerReports {
 
     public record ClaimRequest(String workerId) {}
 
+    /** Chạy song song: xin thêm job cho tài khoản mà worker đang giữ phiên Flow. */
+    public record ClaimMoreRequest(String workerId, long accountId) {}
+
     /** mediaUrl: địa chỉ màn chỉnh sửa kết quả trên Flow (để "Sửa trên Flow" sau này). */
     public record GeneratedReport(String workerId, String stagedFile, String remoteRef, String mediaUrl) {}
 

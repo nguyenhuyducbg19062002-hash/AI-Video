@@ -52,6 +52,13 @@ public interface JobRepository extends JpaRepository<JobEntity, Long> {
 
     long countByProjectIdAndStatus(Long projectId, JobStatus status);
 
+    /** Chạy song song: số job đang tạo của một tài khoản (nguồn sự thật cho việc tài khoản còn bận hay không). */
+    long countByAccountIdAndStatus(Long accountId, JobStatus status);
+
+    long countByAccountIdAndStatusAndIdNot(Long accountId, JobStatus status, Long id);
+
+    List<JobEntity> findByAccountIdAndStatus(Long accountId, JobStatus status);
+
     @Query("select coalesce(max(j.runPriority), 0) from JobEntity j where j.projectId = :projectId")
     int maxRunPriority(@Param("projectId") Long projectId);
 
