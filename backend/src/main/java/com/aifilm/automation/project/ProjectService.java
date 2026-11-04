@@ -195,13 +195,13 @@ public class ProjectService {
 
     private void apply(ProjectEntity p, ProjectForm f) {
         require(f.name(), "Tên phim");
-        require(f.imageDir(), "Folder Ảnh");
-        require(f.videoDir(), "Folder Video");
-        p.setName(f.name().trim());
         // Thư mục nguồn Omni là tùy chọn: có thể nạp từng file Excel bằng "Thêm Excel ảnh" / "Thêm Excel video"
         p.setSourceDir(f.sourceDir() == null ? "" : f.sourceDir().trim());
-        p.setImageDir(f.imageDir().trim());
-        p.setVideoDir(f.videoDir().trim());
+        // Folder Ảnh / Video để trống thì tự tìm trong thư mục nguồn (không phân biệt hoa thường, dấu), không có thì tạo mới ở đó
+        var dirs = ProjectFolderScanner.resolveDirs(p.getSourceDir(), f.imageDir(), f.videoDir());
+        p.setName(f.name().trim());
+        p.setImageDir(dirs.imageDir());
+        p.setVideoDir(dirs.videoDir());
         // thư mục chưa có thì tạo luôn, người dùng không phải tự tay tạo rồi gán
         ensureDir(p.getImageDir(), "Folder Ảnh");
         ensureDir(p.getVideoDir(), "Folder Video");

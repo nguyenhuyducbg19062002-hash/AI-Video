@@ -91,6 +91,52 @@ class ProjectFolderScannerTest {
     }
 
     @Test
+    void blankDirs_areFoundInSourceIgnoringCaseAndAccents() throws IOException {
+        file("ẢNH THAM CHIẾU/a.png");
+        file("PHIM/a.mp4");
+        var d = ProjectFolderScanner.resolveDirs(root.toString(), "", null);
+        assertEquals(root.resolve("ẢNH THAM CHIẾU").toString(), d.imageDir());
+        assertEquals(root.resolve("PHIM").toString(), d.videoDir());
+    }
+
+    @Test
+    void blankDirs_underscoreAndMissingAccentsStillMatch() throws IOException {
+        file("anh_tham_chieu/a.png");
+        file("Video/a.mp4");
+        var d = ProjectFolderScanner.resolveDirs(root.toString(), null, "  ");
+        assertEquals(root.resolve("anh_tham_chieu").toString(), d.imageDir());
+        assertEquals(root.resolve("Video").toString(), d.videoDir());
+    }
+
+    @Test
+    void blankDirs_notFound_areProposedInsideSource() throws IOException {
+        file("all-video-prompts.xlsx");
+        long before = entries();
+        var d = ProjectFolderScanner.resolveDirs(root.toString(), "", "");
+        assertEquals(root.resolve("Ảnh tham chiếu").toString(), d.imageDir());
+        assertEquals(root.resolve("phim").toString(), d.videoDir());
+        assertEquals(before, entries());   // chưa tạo gì: ProjectService tạo khi lưu phim
+    }
+
+    @Test
+    void explicitDirIsKept_onlyTheBlankOneIsResolved() throws IOException {
+        file("Phim/a.mp4");
+        var d = ProjectFolderScanner.resolveDirs(root.toString(), "  D:\\anh-cua-toi  ", "");
+        assertEquals("D:\\anh-cua-toi", d.imageDir());
+        assertEquals(root.resolve("Phim").toString(), d.videoDir());
+    }
+
+    @Test
+    void blankDirWithoutSource_isRejected() {
+        assertThrows(IllegalArgumentException.class, () -> ProjectFolderScanner.resolveDirs("", "", ""));
+        assertThrows(IllegalArgumentException.class, () -> ProjectFolderScanner.resolveDirs(null, "x", ""));
+        // điền đủ cả hai thì không cần thư mục nguồn
+        var d = ProjectFolderScanner.resolveDirs("", "A", "B");
+        assertEquals("A", d.imageDir());
+        assertEquals("B", d.videoDir());
+    }
+
+    @Test
     void missingRootIsRejected() {
         assertThrows(IllegalArgumentException.class, () -> ProjectFolderScanner.scan(root.resolve("khong-co")));
     }

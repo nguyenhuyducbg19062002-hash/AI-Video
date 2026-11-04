@@ -11,37 +11,37 @@
       </div>
 
       <div class="p-5 space-y-4">
-        <div v-if="!project" class="p-3 rounded-xl border border-indigo-200 bg-indigo-50/40 space-y-2">
-          <FolderInput v-model="rootDir" label="Thư mục tổng của tập (khuyên dùng)"
-            placeholder="Chọn thư mục chứa Excel, ảnh tham chiếu, phim…"
-            hint="Chọn một thư mục là xong: app tự tìm file prompt, Folder Ảnh và Folder Video trong đó và điền sẵn bên dưới. Thư mục nào chưa có thì app tự tạo khi bấm Tạo phim." />
-          <div v-if="scanning" class="text-xs text-slate-500">Đang quét thư mục…</div>
-          <div v-else-if="scanError" class="text-xs text-rose-600">{{ scanError }}</div>
-          <ul v-else-if="scan" class="text-xs space-y-1">
-            <li :class="scan.promptFiles.length ? 'text-emerald-700' : 'text-slate-500'">
-              {{ scan.promptFiles.length ? `✓ Tìm thấy ${scan.promptFiles.length} file prompt (${scan.promptFiles.join(', ')})` : 'Không thấy file prompt trong thư mục này: thêm Excel sau ở trang Phim.' }}
-            </li>
-            <li :class="scan.imageExists ? 'text-emerald-700' : 'text-amber-700'">
-              {{ scan.imageExists ? `✓ Dùng thư mục ảnh có sẵn "${base(scan.imageDir)}" (${scan.imageCount} ảnh)` : `+ Chưa có thư mục ảnh: sẽ tạo mới "${base(scan.imageDir)}"` }}
-            </li>
-            <li :class="scan.videoExists ? 'text-emerald-700' : 'text-amber-700'">
-              {{ scan.videoExists ? `✓ Dùng thư mục video có sẵn "${base(scan.videoDir)}" (${scan.videoCount} video)` : `+ Chưa có thư mục video: sẽ tạo mới "${base(scan.videoDir)}"` }}
-            </li>
-          </ul>
-        </div>
-
         <div>
           <label class="label">Tên phim <span class="text-rose-500">*</span></label>
           <input v-model="form.name" required placeholder="Ví dụ: Tập 5. Hà - Cupid" class="input" />
         </div>
 
-        <FolderInput v-model="form.sourceDir" label="Thư mục kết quả của Omni-Flash-Pipeline (tùy chọn)"
-          placeholder="Chọn thư mục output/<tên phim>/…"
-          hint="Có thì app tự nạp các file Excel quen thuộc trong đó. Không có thì dùng nút &quot;Thêm Excel ảnh / video&quot; ở trang Phim." />
+        <div class="space-y-2">
+          <FolderInput v-model="form.sourceDir" label="Thư mục kết quả của Omni-Flash-Pipeline (khuyên dùng)"
+            placeholder="Chọn thư mục của tập: chứa Excel, ảnh tham chiếu, phim…"
+            hint="Chọn thư mục này là đủ: app tự nạp các file Excel quen thuộc, tự tìm Folder Ảnh và Folder Video trong đó (không phân biệt hoa thường, đủ dấu hay thiếu dấu), chưa có thì tự tạo mới khi bấm Tạo phim." />
+          <template v-if="!project">
+            <div v-if="scanning" class="text-xs text-slate-500">Đang quét thư mục…</div>
+            <div v-else-if="scanError" class="text-xs text-rose-600">{{ scanError }}</div>
+            <ul v-else-if="scan" class="text-xs space-y-1 px-1">
+              <li :class="scan.promptFiles.length ? 'text-emerald-700' : 'text-slate-500'">
+                {{ scan.promptFiles.length ? `✓ Tìm thấy ${scan.promptFiles.length} file prompt (${scan.promptFiles.join(', ')})` : 'Không thấy file prompt trong thư mục này: thêm Excel sau ở trang Phim.' }}
+              </li>
+              <li :class="scan.imageExists ? 'text-emerald-700' : 'text-amber-700'">
+                {{ scan.imageExists ? `✓ Dùng thư mục ảnh có sẵn "${base(scan.imageDir)}" (${scan.imageCount} ảnh)` : `+ Chưa có thư mục ảnh: sẽ tạo mới "${base(scan.imageDir)}"` }}
+              </li>
+              <li :class="scan.videoExists ? 'text-emerald-700' : 'text-amber-700'">
+                {{ scan.videoExists ? `✓ Dùng thư mục video có sẵn "${base(scan.videoDir)}" (${scan.videoCount} video)` : `+ Chưa có thư mục video: sẽ tạo mới "${base(scan.videoDir)}"` }}
+              </li>
+            </ul>
+          </template>
+        </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <FolderInput v-model="form.imageDir" label="Folder Ảnh *" hint="Ảnh đã duyệt, tên = ID (CHAR-DOMINIC-1.png). Chưa có thì app tự tạo." />
-          <FolderInput v-model="form.videoDir" label="Folder Video *" hint="Video đã duyệt, tên = mã phim + STT (tap-5-ha-cupid_001.mp4). Chưa có thì app tự tạo." />
+          <FolderInput v-model="form.imageDir" label="Folder Ảnh" placeholder="Để trống: tự tìm / tạo"
+            hint="Ảnh đã duyệt, tên = ID (CHAR-DOMINIC-1.png). Để trống thì app tự tìm trong thư mục kết quả ở trên, chưa có thì tạo mới." />
+          <FolderInput v-model="form.videoDir" label="Folder Video" placeholder="Để trống: tự tìm / tạo"
+            hint="Video đã duyệt, tên = mã phim + STT (tap-5-ha-cupid_001.mp4). Để trống thì app tự tìm trong thư mục kết quả ở trên, chưa có thì tạo mới." />
         </div>
 
         <div>
@@ -160,23 +160,26 @@ const blank = () => ({
 const form = ref(blank())
 const saving = ref(false)
 
-// Thư mục tổng của tập: quét (sau khi dừng gõ / chọn xong) rồi điền sẵn tên phim, thư mục Excel, Folder Ảnh, Folder Video
-const rootDir = ref('')
+// Thư mục kết quả của Omni-Flash-Pipeline (phim mới): quét sau khi dừng gõ / chọn xong, rồi điền sẵn tên phim, Folder Ảnh,
+// Folder Video. Chỉ ghi đè những ô còn trống hoặc do lần quét trước điền; ô người dùng tự gõ thì giữ nguyên.
+// Backend cũng tự tìm / tạo khi hai ô này trống, nên bấm Tạo phim ngay (trước khi quét xong) vẫn đúng.
 const scan = ref(null)
 const scanning = ref(false)
 const scanError = ref('')
 let autoName = ''
+let autoImage = ''
+let autoVideo = ''
 let scanTimer = null
 let scanSeq = 0
 const base = (p) => String(p || '').split(/[\\/]/).filter(Boolean).pop() || p
 
-watch(rootDir, (path) => {
+watch(() => form.value.sourceDir, (path) => {
   clearTimeout(scanTimer)
   scan.value = null
   scanError.value = ''
-  if (!path || !path.trim()) { scanning.value = false; return }
-  scanning.value = true
   const seq = ++scanSeq
+  if (props.project || !path || !path.trim()) { scanning.value = false; return }
+  scanning.value = true
   scanTimer = setTimeout(async () => {
     try {
       const s = await projectsApi.scanFolder(path.trim())
@@ -186,9 +189,14 @@ watch(rootDir, (path) => {
         form.value.name = s.name
         autoName = s.name
       }
-      form.value.sourceDir = s.sourceDir || ''
-      form.value.imageDir = s.imageDir
-      form.value.videoDir = s.videoDir
+      if (!form.value.imageDir || form.value.imageDir === autoImage) {
+        form.value.imageDir = s.imageDir
+        autoImage = s.imageDir
+      }
+      if (!form.value.videoDir || form.value.videoDir === autoVideo) {
+        form.value.videoDir = s.videoDir
+        autoVideo = s.videoDir
+      }
     } catch (e) {
       if (seq === scanSeq) scanError.value = errMsg(e)
     } finally {
@@ -199,10 +207,9 @@ watch(rootDir, (path) => {
 
 watch(() => [props.show, props.project], () => {
   if (!props.show) return
-  rootDir.value = ''
   scan.value = null
   scanError.value = ''
-  autoName = ''
+  autoName = autoImage = autoVideo = ''
   form.value = props.project
     ? { ...blank(), ...props.project, waitAllImages: props.project.waitAllImages !== false,
         videoDuration: props.project.videoDuration ?? null, videoQuality: props.project.videoQuality || '720p',

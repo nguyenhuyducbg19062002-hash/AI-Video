@@ -38,6 +38,27 @@ public final class ProjectFolderScanner {
                        String imageDir, boolean imageExists, int imageCount,
                        String videoDir, boolean videoExists, int videoCount) {}
 
+    public record Dirs(String imageDir, String videoDir) {}
+
+    /**
+     * Thư mục ảnh / video của phim. Người dùng điền thì giữ nguyên; để trống thì tìm trong Thư mục kết quả của Omni-Flash-Pipeline
+     * (không phân biệt hoa thường, đủ dấu hay thiếu dấu), không có thì đề xuất tạo mới ngay trong thư mục đó (việc tạo do
+     * ProjectService làm khi lưu phim).
+     */
+    public static Dirs resolveDirs(String sourceDir, String imageDir, String videoDir) {
+        boolean needImage = imageDir == null || imageDir.isBlank();
+        boolean needVideo = videoDir == null || videoDir.isBlank();
+        if (!needImage && !needVideo) {
+            return new Dirs(imageDir.trim(), videoDir.trim());
+        }
+        if (sourceDir == null || sourceDir.isBlank()) {
+            throw new IllegalArgumentException((needImage ? "Folder Ảnh" : "Folder Video")
+                    + " không được để trống: điền thư mục, hoặc chọn \"Thư mục kết quả của Omni-Flash-Pipeline\" để app tự tìm / tạo");
+        }
+        Scan s = scan(Path.of(sourceDir.trim()));
+        return new Dirs(needImage ? s.imageDir() : imageDir.trim(), needVideo ? s.videoDir() : videoDir.trim());
+    }
+
     private ProjectFolderScanner() {}
 
     public static Scan scan(Path root) {
