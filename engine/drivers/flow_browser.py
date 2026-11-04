@@ -118,8 +118,40 @@ class _SessionOps:
             return {key: k, label: x.label.slice(0, 120), pct: x.m ? +x.m[1] : null, busy: x.busy, imgOk: x.imgOk};
         }); }"""
 
-    def __init__(self, driver: "FlowBrowserDriver", page, s: dict):
-        self.d, self.page, self.s = driver, page, s
+    def __init__(self, driver: "FlowBrowserDriver", page, s: dict, ctx=None):
+        self.d, self.page, self.s, self.ctx = driver, page, s, ctx
+
+    def media_url_in_new_tab(self, key: str) -> str | None:
+        """
+        Địa chỉ màn chỉnh sửa (…/edit/<media id>) của một ô đã xong. Đọc nó phải mở ô rồi quay lại lưới = TẢI LẠI lưới, mà sau khi
+        tải lại Flow sắp xếp ô khác thứ tự lúc đang chạy (đã quan sát: ô video chen giữa các ô ảnh) → làm hỏng việc gắn kết quả theo
+        vị trí của các lệnh còn đang chạy. Nên làm trên một TAB PHỤ (tìm ô theo khoá, khoá ổn định giữa các lần tải đã kiểm chứng) và
+        không bao giờ tải lại trang chính.
+        """
+        if self.ctx is None:
+            return None
+        tab = None
+        try:
+            tab = self.ctx.new_page()
+            tab.set_default_timeout(30_000)
+            tab.goto(project_url(self.page.url), wait_until="domcontentloaded")
+            tab.locator(self.s["result_card"]).first.wait_for(state="attached", timeout=20_000)
+            tab.wait_for_timeout(1_500)
+            self.d._dismiss_popups(tab)
+            return self.d._media_url(tab, self.s, key)
+        except (PlaywrightError, PlaywrightTimeout) as e:
+            log.warning("Không lấy được địa chỉ chỉnh sửa của %s: %s", key, str(e)[:160])
+            return None
+        finally:
+            if tab is not None:
+                try:
+                    tab.close()
+                except PlaywrightError:
+                    pass
+            try:
+                self.page.bring_to_front()
+            except PlaywrightError:
+                pass
 
     # Lưới Flow dùng cuộn ảo (.cdk-virtual-scrollable): chỉ ~16 ô nằm trong trang và cửa sổ đó theo vị trí cuộn. Muốn thấy các ô
     # MỚI NHẤT (để gắn kết quả theo vị trí từ trên cùng) thì phải đưa lưới về đầu; bước tải về cuộn ô vào tầm nhìn nên sau đó
@@ -191,13 +223,8 @@ class _SessionOps:
         staging.mkdir(parents=True, exist_ok=True)
         path = d._download(page, s, tile.key, staging, job["externalId"], job["kind"],
                            job.get("videoQuality") or DEFAULT_VIDEO_QUALITY)
-        media_url = None
-        if job["kind"] == "VIDEO":
-            # địa chỉ màn chỉnh sửa (cho "Sửa trên Flow") không đọc được từ ô: phải mở ô rồi quay lại lưới
-            media_url = d._media_url(page, s, tile.key)
-            deadline = time.monotonic() + 10
-            while len(self.generated_tiles()) < 3 and time.monotonic() < deadline:
-                page.wait_for_timeout(300)   # lưới vẽ lại sau khi quay về: chờ có ô rồi mới đọc tiếp
+        # địa chỉ màn chỉnh sửa (cho "Sửa trên Flow") không đọc được từ ô: phải mở ô; làm ở tab phụ để KHÔNG tải lại trang chính
+        media_url = self.media_url_in_new_tab(tile.key) if job["kind"] == "VIDEO" else None
         return GenerationResult(staged_file=path, remote_ref=project_url(page.url), media_url=media_url)
 
     def page_error(self):
@@ -216,7 +243,8 @@ class _SessionOps:
         """Flow tự mở màn chỉnh sửa khi một video xong: quay lại lưới (các ô đang tạo vẫn nằm trên máy chủ Flow)."""
         if not edit_media_id(self.page.url):
             return
-        log.info("Flow mở màn chỉnh sửa (%s): quay lại lưới dự án", edit_media_id(self.page.url))
+        # CẢNH BÁO: tải lại lưới làm Flow sắp xếp ô khác lúc đang chạy; phiên chỉ còn kiểm tra mỏ neo để phát hiện lệch pha
+        log.warning("Flow mở màn chỉnh sửa (%s): quay lại lưới dự án (có thể đổi thứ tự ô)", edit_media_id(self.page.url))
         self.page.goto(project_url(self.page.url), wait_until="domcontentloaded")
         try:
             self.page.locator(self.s["result_card"]).first.wait_for(state="attached", timeout=15_000)
@@ -866,7 +894,7 @@ class FlowBrowserDriver:
             except (PlaywrightTimeout, AssertionError) as e:
                 raise TransientError(f"Hết thời gian chờ một phần tử trên Flow: {str(e)[:500]}") from e
             log.info("Phiên Flow song song: tối đa %d lệnh cùng lúc trên %s", capacity, first_job["account"].get("email"))
-            SessionRunner(_SessionOps(self, page, s), capacity, claim_more, on_start, on_done, on_fail, stop_of).run(first_job)
+            SessionRunner(_SessionOps(self, page, s, ctx), capacity, claim_more, on_start, on_done, on_fail, stop_of).run(first_job)
 
     def _media_url(self, page, s: dict, media_id: str) -> str | None:
         """Địa chỉ màn chỉnh sửa của kết quả (…/project/<id>/edit/<media>): mở ô kết quả rồi đọc địa chỉ, quay lại lưới."""
