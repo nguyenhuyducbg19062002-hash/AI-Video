@@ -21,7 +21,7 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Optional, Protocol
 
-from .errors import (AccountBroken, AuthRequired, Cancelled, ConfigError, GenerationResult, PausedByUser, QuotaExceeded,
+from .errors import (AccountBroken, AuthRequired, BotSuspected, Cancelled, ConfigError, GenerationResult, PausedByUser, QuotaExceeded,
                      Rejected, TransientError, WorkerError)
 
 log = logging.getLogger("flow.session")
@@ -33,6 +33,8 @@ class Tile:
     label: str
     pct: Optional[int]    # % đang tạo; None khi không còn chạy
     ready: bool           # đã xong, tải về được
+    failed: bool = False  # Flow đánh dấu ô "Failed" (không tính phí): không bao giờ xong, phải báo lỗi ngay thay vì chờ hết giờ
+    error: str = ""       # chữ Flow ghi trên ô lỗi
 
 
 class FlowOps(Protocol):
@@ -169,6 +171,9 @@ class SessionRunner:
             tile = tiles[idx] if 0 <= idx < len(tiles) else None
             if tile is None:
                 pass   # ô đang nằm ngoài cửa sổ cuộn ảo (rất cũ) hoặc lưới chưa vẽ xong: chờ tiếp, quá hạn thì báo lỗi bên dưới
+            elif tile.failed:
+                self._finish(job, self._tile_error(tile.error), slot)
+                continue
             elif tile.ready:
                 try:
                     result = self.ops.download(job, tile)
@@ -185,6 +190,19 @@ class SessionRunner:
 
         self._check_page_error()
         return True
+
+    def _tile_error(self, text: str) -> WorkerError:
+        """Ô Flow báo Failed. "unusual activity" = Flow nghi tự động hóa: dừng nhận thêm việc để tài khoản nghỉ, không đốt thêm lệnh."""
+        low = (text or "").lower()
+        if "unusual activity" in low or "hoạt động bất thường" in low:
+            self._claiming = False
+            return BotSuspected(f"Flow nghi ngờ hoạt động tự động: {text[:200]}")
+        if any(w in low for w in ("not enough credits", "out of credits", "hết tín dụng")):
+            self._claiming = False
+            return QuotaExceeded(f"Flow báo: {text[:200]}")
+        if any(w in low for w in ("policy", "policies", "chính sách", "can't generate", "couldn't generate")):
+            return Rejected(f"Flow từ chối: {text[:200]}")
+        return TransientError(f"Flow báo ô tạo lỗi: {text[:200]}")
 
     def _check_page_error(self) -> None:
         err = self.ops.page_error()

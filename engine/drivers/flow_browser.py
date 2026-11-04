@@ -112,10 +112,13 @@ class _SessionOps:
             const imgOk = !!(img && img.complete && img.naturalWidth > 0);
             const isVideo = !!c.querySelector('video, flow-video-tile');
             const uploaded = !busy && !isVideo && imgOk && /[.](png|jpe?g|webp|gif|bmp)$/i.test(label);
-            return {c, label, m, busy, imgOk, uploaded};
+            // ô lỗi của Flow: chữ "Failed" ở đầu + lý do, không có % / vòng quay (đã thấy: "We noticed some unusual activity…")
+            const failed = !busy && /^\\s*(\\S{0,3}\\s*)?failed\\b/i.test(c.innerText || '');
+            return {c, label, m, busy, imgOk, uploaded, failed, err: failed ? (c.innerText || '').replace(/\\s+/g, ' ').trim() : ''};
         }).filter(x => !x.uploaded).map(x => {
             const k = keyOf(x.c); if (k) x.c.setAttribute('data-afm-key', k);
-            return {key: k, label: x.label.slice(0, 120), pct: x.m ? +x.m[1] : null, busy: x.busy, imgOk: x.imgOk};
+            return {key: k, label: x.label.slice(0, 120), pct: x.m ? +x.m[1] : null, busy: x.busy, imgOk: x.imgOk,
+                    failed: x.failed, err: x.err.slice(0, 300)};
         }); }"""
 
     def __init__(self, driver: "FlowBrowserDriver", page, s: dict, ctx=None):
@@ -165,7 +168,8 @@ class _SessionOps:
         js = self._TILES_JS.replace("/*KEYS*/", FlowBrowserDriver._TILE_KEYS_JS)   # ghép lúc gọi: lớp này khai báo trước FlowBrowserDriver
         rows = self.page.evaluate(js, [self.s["result_card"]])
         return [Tile(key=r["key"], label=r["label"], pct=r["pct"],
-                     ready=bool(r["key"]) and not r["busy"] and r["imgOk"]) for r in rows]
+                     ready=bool(r["key"]) and not r["busy"] and r["imgOk"] and not r.get("failed"),
+                     failed=bool(r.get("failed")), error=r.get("err") or "") for r in rows]
 
     @staticmethod
     def _norm(text: str) -> str:

@@ -108,6 +108,12 @@ public class JobResultService {
                 acc.cooldown(LocalDateTime.now().plusMinutes(minutes), r.message());
                 requeue(job, acc, "hết quota trên " + acc.getEmail() + " → xoay sang tài khoản khác");   // không tính attempt
             }
+            case SUSPICIOUS -> {
+                // Flow nghi ngờ: KHÔNG cố gửi tiếp trên tài khoản này. Cho nghỉ rồi để tài khoản khác (hoặc chính nó sau giờ nghỉ) làm.
+                int minutes = settings.getIntSetting("suspicious_cooldown_minutes", 30);
+                acc.cooldown(LocalDateTime.now().plusMinutes(minutes), r.message());
+                requeue(job, acc, "Flow nghi ngờ hoạt động bất thường trên " + acc.getEmail() + " → nghỉ " + minutes + " phút, xoay sang tài khoản khác");
+            }
             case AUTH_REQUIRED -> {
                 acc.needLogin(r.message());
                 requeue(job, acc, "phiên đăng nhập của " + acc.getEmail() + " hỏng → xoay sang tài khoản khác");

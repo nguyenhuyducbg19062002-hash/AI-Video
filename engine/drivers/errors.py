@@ -17,6 +17,12 @@ class QuotaExceeded(WorkerError):
     code = "QUOTA_EXCEEDED"
 
 
+class BotSuspected(WorkerError):
+    """Flow báo "We noticed some unusual activity" (nghi tự động hóa / gửi quá nhanh): tài khoản cần nghỉ một lúc,
+    job không bị tính lượt thử mà chuyển sang tài khoản khác hoặc chạy lại sau."""
+    code = "SUSPICIOUS"
+
+
 class AuthRequired(WorkerError):
     """Phiên đăng nhập hỏng / checkpoint: tài khoản cần đăng nhập lại."""
     code = "AUTH_REQUIRED"

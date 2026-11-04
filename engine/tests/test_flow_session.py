@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from drivers.errors import (AuthRequired, Cancelled, GenerationResult, QuotaExceeded, Rejected,  # noqa: E402
+from drivers.errors import (AuthRequired, BotSuspected, Cancelled, GenerationResult, QuotaExceeded, Rejected,  # noqa: E402
                             TransientError, WorkerError)
 from drivers.flow_session import SessionRunner, Tile  # noqa: E402
 
@@ -33,11 +33,15 @@ class FakeFlow:
         self.fail_download = {}    # jobId -> exception
         self.page_error_value = None
         self.grid_calls = 0
+        self.fail_tile = {}        # jobId -> chữ Flow ghi trên ô "Failed"
 
     def generated_tiles(self):
         out = []
         for t in self.tiles:
             done = self.clock.now >= t["done_at"]
+            if done and t["owner"] in self.fail_tile:
+                out.append(Tile(key=None, label="", pct=None, ready=False, failed=True, error=self.fail_tile[t["owner"]]))
+                continue
             key = f"media-{t['owner']}" if (t["owner"] is not None and done) else (f"old-{t['label']}" if t["owner"] is None else None)
             out.append(Tile(key=key, label=t["label"] if not done or t["owner"] is None else f"title {t['owner']}",
                             pct=None if done else int((self.clock.now - t["start"]) * 5) % 100, ready=done))
@@ -205,6 +209,22 @@ class SessionRunnerTest(unittest.TestCase):
         h.run(job(1))
         self.assertEqual([(j, type(e)) for j, e in h.failed], [(2, Rejected)], "chỉ lệnh gửi gần nhất bị quy, và chỉ một lần")
         self.assertEqual([d[0] for d in h.done], [1])
+
+    def test_unusual_activity_tile_is_reported_at_once_and_stops_new_work(self):
+        h = Harness({1: 10, 2: 10, 3: 10}, [job(2), job(3)], capacity=1)
+        h.flow.fail_tile[1] = "Failed We noticed some unusual activity. Note that browser extensions may cause issues."
+        h.run(job(1))
+        self.assertEqual([(j, type(e)) for j, e in h.failed], [(1, BotSuspected)])
+        self.assertLess(h.clock.now, 60, "báo ngay khi ô Failed, không chờ hết giờ 900s")
+        self.assertEqual(h.done, [])
+        self.assertEqual([j["jobId"] for j in h.started], [1], "tài khoản bị nghi ngờ thì không nhận thêm việc")
+
+    def test_other_failed_tile_is_a_transient_error_and_session_continues(self):
+        h = Harness({1: 10, 2: 10}, [job(2)], capacity=1)
+        h.flow.fail_tile[1] = "Failed Something went wrong"
+        h.run(job(1))
+        self.assertEqual([(j, type(e)) for j, e in h.failed], [(1, TransientError)])
+        self.assertEqual([d[0] for d in h.done], [2])
 
     def test_a_download_error_is_reported_for_that_job_only(self):
         h = Harness({1: 10, 2: 10}, [job(2)])
