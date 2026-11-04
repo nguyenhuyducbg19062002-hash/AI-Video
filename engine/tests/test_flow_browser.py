@@ -38,6 +38,12 @@ class Loc:
     def hover(self, *a, **k):
         pass
 
+    def filter(self, **k):
+        return self
+
+    def all_inner_texts(self):
+        return []
+
     def scroll_into_view_if_needed(self):
         pass
 
@@ -149,6 +155,14 @@ class ProxyTests(unittest.TestCase):
         self.assertNotIn("SECRET", str(e))
         self.assertIn("1.2.3.4:8080", str(e))
 
+    def test_socks5_with_credentials_is_account_broken(self):
+        acc = {"email": "a@b.c", "profileDir": "x", "proxy": "socks5://u:SECRET@1.2.3.4:1080"}
+        with self.assertRaises(AccountBroken) as cx:
+            with driver()._browser(acc, True):
+                pass
+        self.assertNotIn("SECRET", str(cx.exception))
+        self.assertIn("1.2.3.4:1080", str(cx.exception))
+
     def test_proxy_word_in_launch_log_is_transient(self):
         e = self._launch_error("Failed: --proxy-server=http://1.2.3.4:8080 crashed")
         self.assertIsInstance(e, TransientError)
@@ -247,6 +261,12 @@ class ErrorTextTests(unittest.TestCase):
         with self.assertRaises(QuotaExceeded):
             fb.FlowBrowserDriver._raise_if_error(page, self.S, base)
 
+    def test_only_visible_texts_are_counted(self):
+        page = FakePage()
+        page.get_by_text = lambda text, exact=False: mock.Mock(filter=lambda **k: Loc(page, text, 1 if k.get("visible") else 5))
+        self.assertEqual(fb.FlowBrowserDriver._error_counts(page, self.S), {("quota_texts", "out of credits"): 1,
+                                                                            ("policy_texts", "violates our policies"): 1})
+
     def test_new_policy_text_rejected(self):
         page = FakePage()
         base = fb.FlowBrowserDriver._error_counts(page, self.S)
@@ -276,30 +296,31 @@ class UploadTests(unittest.TestCase):
         page.expect_file_chooser = lambda: Chooser()
         page.keyboard = mock.Mock()
         d = driver()
-        d._listbox_text = lambda p, s: names_after if state["uploaded"] else names_before
+        d._listbox_text = lambda p, s: ""
+        d._listbox_names = lambda p, s: {d._nfc(x) for x in (names_after if state["uploaded"] else names_before)}
         s = {"add_reference_button": "add", "ingredient_listbox": "lb", "upload_button": "up"}
         res = d._upload_refs(page, s, [str(img)], should_stop)
         return res, files
 
     def test_substring_name_does_not_count_as_present(self):
-        res, files = self._upload("CHAR-1.png.bak\nCHAR-1.pngx", "CHAR-1.png\nCHAR-1.png.bak", "CHAR-1.png")
+        res, files = self._upload(["CHAR-1.png.bak", "CHAR-1.pngx"], ["CHAR-1.png", "CHAR-1.png.bak"], "CHAR-1.png")
         self.assertTrue(res)
         self.assertEqual(len(files), 1)
 
     def test_exact_name_skips_upload(self):
-        res, files = self._upload("icon\nCHAR-1.png", "", "CHAR-1.png")
+        res, files = self._upload(["icon", "CHAR-1.png"], [], "CHAR-1.png")
         self.assertFalse(res)
         self.assertEqual(files, [])
 
     def test_nfc_normalised(self):
         nfd = unicodedata.normalize("NFD", "Ảnh.png")
         nfc = unicodedata.normalize("NFC", "Ảnh.png")
-        res, files = self._upload(nfd, "", nfc)
+        res, files = self._upload([nfd], [], nfc)
         self.assertFalse(res)
 
     def test_should_stop_cancels_upload(self):
         with self.assertRaises(Cancelled):
-            self._upload("", "", "a.png", should_stop=lambda: True)
+            self._upload([], [], "a.png", should_stop=lambda: True)
 
 
 class ChipsTests(unittest.TestCase):
@@ -307,9 +328,9 @@ class ChipsTests(unittest.TestCase):
         return {"externalId": "S1", "kind": "IMAGE", "prompt": "hi @CHAR-1 and @CHAR-2", "referenceImages": ["x/CHAR-1.png", "x/CHAR-2.png"],
                 "stagingDir": tempfile.mkdtemp(), "account": {"email": "a@b.c"}, "timeoutSeconds": 5}
 
-    def _gen(self, chips, should_stop=lambda: False, url=None):
+    def _gen(self, attached, should_stop=lambda: False, prompt=None):
         d = driver()
-        page = FakePage(url or FakePage().url)
+        page = FakePage()
 
         @contextmanager
         def browser(account, headless):
@@ -324,26 +345,35 @@ class ChipsTests(unittest.TestCase):
         d._pending_result = lambda *a, **k: None
         d._upload_refs = lambda *a, **k: False
         d._media_ids = lambda *a, **k: []
-        d._compose_prompt = lambda *a, **k: chips
+        d._compose_prompt = lambda *a, **k: attached
+        d._error_counts = lambda *a, **k: {}
         d._wait_result = mock.Mock(side_effect=TransientError("stop here"))
         d._save_pending = lambda *a, **k: None
         with self.assertRaises(Exception) as cx:
-            d.generate(self._job(), should_stop)
+            job = self._job()
+            if prompt:
+                job["prompt"] = prompt
+            d.generate(job, should_stop)
         return cx.exception, page
 
     def test_missing_chip_does_not_click_generate(self):
-        e, page = self._gen(1)
+        e, page = self._gen({"CHAR-1"})
         self.assertIsInstance(e, TransientError)
         self.assertIn("1/2", str(e))
         self.assertEqual(page.clicks, [])
 
+    def test_same_id_twice_needs_one_chip(self):
+        e, page = self._gen({"CHAR-1"}, prompt="@CHAR-1 meets @CHAR-1")
+        self.assertEqual(str(e), "stop here")
+        self.assertEqual(len(page.clicks), 1)
+
     def test_all_chips_clicks_generate(self):
-        e, page = self._gen(2)
+        e, page = self._gen({"CHAR-1", "CHAR-2"})
         self.assertEqual(str(e), "stop here")
         self.assertEqual(len(page.clicks), 1)
 
     def test_should_stop_before_generate(self):
-        e, page = self._gen(2, should_stop=lambda: True)
+        e, page = self._gen({"CHAR-1", "CHAR-2"}, should_stop=lambda: True)
         self.assertIsInstance(e, Cancelled)
         self.assertEqual(page.clicks, [])
 
@@ -363,25 +393,36 @@ class ChipsTests(unittest.TestCase):
 
 
 class DownloadTests(unittest.TestCase):
-    def test_no_quality_item_raises_without_clicking_other_menuitem(self):
-        page = FakePage("https://flow.google.com/project/x")
-        s = {"result_card": "card", "tile_menu_button": "menu", "download_menu_item": "dl",
-             "download_quality_option": "[q='{quality}']"}
-        page.counts = {"[q='720p']": 0, "[role=menuitem]:not([disabled])": 3}
-        d = driver()
-        d._card = lambda p, s_, k: Loc(page, "card")
-        with self.assertRaises(TransientError):
-            d._click_download(page, s, "m1", "VIDEO", "720p")
-        self.assertNotIn("[role=menuitem]:not([disabled])", page.clicks)
+    S = {"result_card": "card", "tile_menu_button": "menu", "download_menu_item": "dl",
+         "download_quality_option": "[q='{quality}']"}
+    SUB = "[role=menuitem]:not([disabled])"
 
-    def test_quality_option_clicked(self):
+    def _click(self, counts, quality="720p"):
         page = FakePage("https://flow.google.com/project/x")
-        s = {"result_card": "card", "tile_menu_button": "menu", "download_menu_item": "dl",
-             "download_quality_option": "[q='{quality}']"}
+        page.counts = counts
         d = driver()
         d._card = lambda p, s_, k: Loc(page, "card")
-        d._click_download(page, s, "m1", "VIDEO", "7'2")
-        self.assertIn("[q='7\\'2']", page.clicks)
+        try:
+            d._click_download(page, self.S, "m1", "VIDEO", quality)
+        finally:
+            self.page = page
+
+    def test_exact_quality_clicked(self):
+        self._click({})
+        self.assertEqual(self.page.clicks, ["menu", "[q='720p']"])
+
+    def test_falls_back_to_lower_quality(self):
+        self._click({"[q='720p']": 0, "[q='480p']": 1, "[q='360p']": 1})
+        self.assertEqual(self.page.clicks[-1], "[q='480p']")
+
+    def test_falls_back_to_first_labelled_item_of_submenu(self):
+        self._click({f"[q='{q}']": 0 for q in fb.VIDEO_QUALITIES})
+        self.assertEqual(self.page.clicks, ["menu", self.SUB])
+
+    def test_empty_menu_raises(self):
+        with self.assertRaises(TransientError):
+            self._click({**{f"[q='{q}']": 0 for q in fb.VIDEO_QUALITIES}, self.SUB: 0})
+        self.assertEqual(self.page.clicks, ["menu"])
 
     def _download(self, dl, should_stop=None):
         page = FakePage()
@@ -400,6 +441,18 @@ class DownloadTests(unittest.TestCase):
         path, staging = self._download(FakeDownload(b"abc"))
         self.assertEqual(path.read_bytes(), b"abc")
         self.assertEqual([p.name for p in staging.iterdir()], ["S1.mp4"])
+
+    def test_failed_save_leaves_no_part_file(self):
+        staging = Path(tempfile.mkdtemp())
+
+        class Partial(FakeDownload):
+            def save_as(self, path):
+                Path(path).write_bytes(b"half")
+                raise OSError("cut")
+
+        with self.assertRaises(OSError):
+            fb.FlowBrowserDriver._save_download(Partial(), staging / "S1.mp4")
+        self.assertEqual(list(staging.iterdir()), [])
 
     def test_empty_file_rejected(self):
         with self.assertRaises(TransientError):
