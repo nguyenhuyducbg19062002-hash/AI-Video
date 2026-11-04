@@ -5,15 +5,21 @@ import com.aifilm.automation.account.AccountRepository;
 import com.aifilm.automation.project.ProjectEntity;
 import com.aifilm.automation.project.ProjectRepository;
 import com.aifilm.automation.project.ProjectStatus;
+import com.aifilm.automation.prompt.ProjectAssetRepository;
 import com.aifilm.automation.prompt.PromptKind;
+import com.aifilm.automation.prompt.PromptReferenceEntity;
+import com.aifilm.automation.prompt.PromptReferenceRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.locks.ReentrantLock;
 
 @Service
@@ -26,6 +32,8 @@ public class JobClaimService {
     private final ProjectRepository projects;
     private final JobTransitions transitions;
     private final JobPayloadFactory payloads;
+    private final ProjectAssetRepository assets;
+    private final PromptReferenceRepository references;
     private final TransactionTemplate tx;
     private final ReentrantLock claimLock = new ReentrantLock();
 
@@ -43,6 +51,55 @@ public class JobClaimService {
         }
     }
 
+    /**
+     * Chạy theo cảnh (phim tắt "duyệt hết ảnh rồi mới tạo video"): đi lần lượt các video theo thứ tự cảnh.
+     * - Cảnh đủ ảnh reference (có sẵn hoặc đã duyệt): chạy luôn video.
+     * - Cảnh thiếu ảnh: chạy đúng ảnh còn thiếu trước (ảnh đó cần ảnh khác chưa có thì chạy ảnh gốc trước nữa), xong và duyệt
+     *   thì lượt sau mới tới video của cảnh.
+     * - Ảnh đang tạo / chờ duyệt, hoặc thiếu ảnh mà không có prompt tạo: cảnh chờ, chuyển sang cảnh kế tiếp.
+     * Ảnh không cảnh nào cần thì không được tạo (muốn tạo thì bấm "Chạy cảnh này" hoặc bật "duyệt hết ảnh trước").
+     */
+    Optional<JobEntity> nextBySceneOrder(ProjectEntity p) {
+        Set<String> have = new HashSet<>();
+        assets.findByProjectId(p.getId()).forEach(a -> have.add(a.getExternalId()));
+        for (JobEntity video : jobs.findPendingVideoJobsInOrder(p.getId())) {
+            Optional<JobEntity> pick = runnableFor(video, p.getId(), have, new HashSet<>(), 0);
+            if (pick.isPresent()) {
+                return pick;
+            }
+        }
+        return Optional.empty();
+    }
+
+    /** Job nên chạy để đưa `job` tiến lên: chính nó nếu đủ ảnh, ngược lại là job tạo một ảnh còn thiếu của nó. */
+    private Optional<JobEntity> runnableFor(JobEntity job, long projectId, Set<String> have, Set<Long> visited, int depth) {
+        if (depth > 4 || !visited.add(job.getId())) {
+            return Optional.empty();
+        }
+        List<String> missing = references.findByVideoPromptIdOrderByOrdinalAsc(job.getPromptId()).stream()
+                .map(PromptReferenceEntity::getRefExternalId).filter(id -> !have.contains(id)).toList();
+        if (missing.isEmpty()) {
+            return Optional.of(job);
+        }
+        List<JobEntity> producers = new ArrayList<>();
+        for (String id : missing) {
+            Optional<JobEntity> producer = jobs.findImageJob(projectId, id);
+            if (producer.isEmpty()) {
+                return Optional.empty();   // thiếu ảnh mà không có prompt tạo: cảnh này chưa chạy được, đừng tạo ảnh vô ích
+            }
+            producers.add(producer.get());
+        }
+        for (JobEntity producer : producers) {
+            if (producer.getStatus() == JobStatus.PENDING) {
+                Optional<JobEntity> pick = runnableFor(producer, projectId, have, visited, depth + 1);
+                if (pick.isPresent()) {
+                    return pick;
+                }
+            }
+        }
+        return Optional.empty();   // ảnh đang tạo / chờ duyệt / lỗi: cảnh chờ
+    }
+
     private Optional<JobPayload> claimInTx(String workerId) {
         LocalDateTime now = LocalDateTime.now();
         for (ProjectEntity p : projects.findByStatusOrderByIdAsc(ProjectStatus.RUNNING)) {
@@ -51,7 +108,16 @@ public class JobClaimService {
             }
             boolean imagesOnly = !p.isSkipMissingRefsOn() && p.isWaitAllImagesOn() && jobs.countByProjectIdAndKindAndStatusNotIn(
                     p.getId(), PromptKind.IMAGE, List.of(JobStatus.SUCCESS, JobStatus.CANCELLED)) > 0;
-            Optional<JobEntity> next = jobs.findNextRunnable(p.getId(), imagesOnly ? 1 : 0, p.isSelectedOnlyOn() ? 1 : 0, p.isSkipMissingRefsOn() ? 1 : 0);
+            Optional<JobEntity> next;
+            if (!p.isSkipMissingRefsOn() && !p.isWaitAllImagesOn() && !p.isSelectedOnlyOn()) {
+                // Chạy theo cảnh: cảnh người dùng bấm "Chạy cảnh này" đi trước như cũ, rồi tới từng cảnh theo thứ tự
+                next = jobs.findNextRunnable(p.getId(), 0, 1, 0);
+                if (next.isEmpty()) {
+                    next = nextBySceneOrder(p);
+                }
+            } else {
+                next = jobs.findNextRunnable(p.getId(), imagesOnly ? 1 : 0, p.isSelectedOnlyOn() ? 1 : 0, p.isSkipMissingRefsOn() ? 1 : 0);
+            }
             if (next.isEmpty()) {
                 if (p.isSelectedOnlyOn() && jobs.countSelectedLeft(p.getId()) == 0) {
                     p.setSelectedOnly(false);

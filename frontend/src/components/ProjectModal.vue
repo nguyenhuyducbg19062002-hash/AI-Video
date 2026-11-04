@@ -56,7 +56,8 @@
             <span class="block text-sm font-medium text-slate-700">Duyệt xong hết ảnh rồi mới tạo video</span>
             <span class="block text-[11px] text-slate-500 mt-0.5">
               Bật: tạo và duyệt toàn bộ ảnh reference trước, sau đó mới tự upload ảnh lên Flow để tạo video.
-              Tắt: cảnh nào đủ ảnh đã duyệt thì tạo video cảnh đó ngay (nhanh hơn).
+              Tắt (chạy theo cảnh): ảnh có sẵn thì bỏ qua; cảnh nào đủ ảnh thì tạo video ngay; cảnh nào thiếu ảnh thì app
+              tạo đúng ảnh đó trước rồi mới tạo video. Ảnh không cảnh nào cần thì không tạo.
             </span>
           </span>
         </label>

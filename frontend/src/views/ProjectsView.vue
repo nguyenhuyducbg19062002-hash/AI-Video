@@ -72,7 +72,8 @@
               ({{ current.imagesDone }}/{{ current.imagesTotal }} ảnh đã duyệt).
             </template>
             <template v-else>
-              Video của cảnh nào bắt đầu ngay khi mọi ảnh reference của cảnh đó đã được duyệt ({{ current.imagesDone }}/{{ current.imagesTotal }} ảnh xong).
+              Chạy theo cảnh: cảnh đủ ảnh thì tạo video ngay; cảnh thiếu ảnh thì tạo đúng ảnh đó trước rồi mới tạo video
+              ({{ current.imagesDone }}/{{ current.imagesTotal }} ảnh xong). Ảnh có sẵn được bỏ qua.
             </template>
           </div>
           <div v-else-if="current.total > current.imagesTotal && current.imagesTotal > 0" class="note-info">
@@ -170,7 +171,7 @@
           <span class="text-slate-500">Nền tảng: <b class="text-slate-700 font-medium">{{ providerLabel(current.project.provider) }}</b></span>
           <span class="text-slate-500">Song song: <b class="text-slate-700 font-medium">{{ current.project.maxParallel }}</b></span>
           <span class="text-slate-500">Số lần thử: <b class="text-slate-700 font-medium">{{ current.project.maxAttempts }}</b></span>
-          <label class="flex items-center gap-2 cursor-pointer select-none" title="Bật: duyệt xong ảnh PANEL của cảnh nào là video cảnh đó chạy luôn, không đợi duyệt hết ảnh của cả phim">
+          <label class="flex items-center gap-2 cursor-pointer select-none" title="Bật: chạy theo cảnh. Ảnh có sẵn thì bỏ qua; cảnh nào thiếu ảnh thì tạo đúng ảnh đó trước rồi mới tạo video; không đợi duyệt hết ảnh của cả phim">
             <button type="button" role="switch" :aria-checked="current.project.waitAllImages === false" @click="toggleVideoEarly" :disabled="busy"
               :class="current.project.waitAllImages === false ? 'bg-emerald-500' : 'bg-slate-300'"
               class="relative inline-flex h-5 w-9 shrink-0 rounded-full transition">
