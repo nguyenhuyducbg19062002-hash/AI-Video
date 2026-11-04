@@ -14,9 +14,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -51,12 +53,24 @@ public class ReviewService {
         Path staged = StagingGuard.requireInside(Path.of(job.getPreviewPath()));
         Path dir = Path.of(prompt.getKind() == PromptKind.IMAGE ? project.getImageDir() : project.getVideoDir());
         Path target = dir.resolve(finalFileName(project, prompt, extensionOf(staged.getFileName().toString())));
+        Path part = target.resolveSibling(target.getFileName() + "." + UUID.randomUUID() + ".part");
         try {
             Files.createDirectories(dir);
-            Path part = target.resolveSibling(target.getFileName() + ".part");
-            Files.copy(staged, part, StandardCopyOption.REPLACE_EXISTING);
+            Files.copy(staged, part);
+            if (Files.exists(target) && !target.toString().equals(job.getFinalPath())) {
+                // file cùng tên không do chính cảnh này lưu (ví dụ ảnh người dùng): giữ lại dưới tên .bak, không ghi đè
+                Path bak = target.resolveSibling(target.getFileName() + "."
+                        + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS")) + ".bak");
+                Files.move(target, bak);
+                log.info("Job {}: file cũ {} được giữ lại thành {}", jobId, target.getFileName(), bak.getFileName());
+            }
             Files.move(part, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         } catch (IOException e) {
+            try {
+                Files.deleteIfExists(part);
+            } catch (IOException ignored) {
+                // file tạm còn sót không ảnh hưởng kết quả
+            }
             throw new UncheckedIOException("Không ghi được " + target + ": " + e.getMessage(), e);
         }
 
@@ -137,7 +151,9 @@ public class ReviewService {
         job.setErrorCode(null);
         job.setErrorMessage(null);
         job.setCancelRequested(false);
-        transitions.move(job, JobStatus.PENDING, null, note == null || note.isBlank() ? "tạo lại" : "tạo lại: " + note);
+        if (job.getStatus() != JobStatus.PENDING) {   // đang chờ chạy: chỉ cập nhật prompt, không cần chuyển trạng thái
+            transitions.move(job, JobStatus.PENDING, null, note == null || note.isBlank() ? "tạo lại" : "tạo lại: " + note);
+        }
         return job;
     }
 
@@ -184,15 +200,24 @@ public class ReviewService {
         }
         Path staged = com.aifilm.automation.system.AppPaths.staging().resolve("job-" + jobId).resolve("manual")
                 .resolve(prompt.getExternalId() + ext);
+        // ghi ra tên tạm, kiểm tra xong mới đổi tên: file hỏng không đè lên bản xem trước cũ
+        Path upload = staged.resolveSibling(staged.getFileName() + "." + UUID.randomUUID() + ".upload");
         try {
             Files.createDirectories(staged.getParent());
-            file.transferTo(staged);
+            file.transferTo(upload);
+            var problem = MediaCheck.problem(upload).or(() -> MediaCheck.wrongKind(upload, video));
+            if (problem.isPresent()) {
+                throw new IllegalArgumentException("File không dùng được: " + problem.get());
+            }
+            Files.move(upload, staged, StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException e) {
             throw new UncheckedIOException("Không lưu được file tải lên: " + e.getMessage(), e);
-        }
-        var problem = MediaCheck.problem(staged).or(() -> MediaCheck.wrongKind(staged, video));
-        if (problem.isPresent()) {
-            throw new IllegalArgumentException("File không dùng được: " + problem.get());
+        } finally {
+            try {
+                Files.deleteIfExists(upload);
+            } catch (IOException ignored) {
+                // file tạm còn sót được dọn cùng staging
+            }
         }
         if (job.getStatus() == JobStatus.SUCCESS || job.getStatus() == JobStatus.APPROVED || job.getStatus() == JobStatus.DOWNLOADING) {
             regenerate(jobId, null, "thay bằng file người dùng đưa vào");
@@ -290,7 +315,7 @@ public class ReviewService {
                 }
             }
         }
-        if (only && !append) {
+        if (only && !append && !picked.isEmpty()) {
             // chỉ chạy nhóm mới chọn (nút ở từng cảnh: append = cộng thêm vào nhóm đang chạy): bỏ dấu "đã chọn" của các lần chọn trước
             jobs.findByProjectId(projectId).stream().filter(j -> j.getRunPriority() != null).forEach(j -> j.setRunPriority(null));
         }
@@ -310,6 +335,9 @@ public class ReviewService {
     @Transactional
     public JobEntity cancel(long jobId) {
         JobEntity job = jobs.findById(jobId).orElseThrow();
+        if (job.getStatus() == JobStatus.SUCCESS || job.getStatus() == JobStatus.CANCELLED) {
+            return job;   // đã xong / đã hủy: không còn gì để hủy
+        }
         if (job.getStatus() == JobStatus.GENERATING) {
             job.setCancelRequested(true);   // worker dừng ở heartbeat kế tiếp và báo CANCELLED
         } else {
