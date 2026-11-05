@@ -15,8 +15,8 @@ const MAP = {
   // job
   PENDING: ['Chờ chạy', 'bg-slate-50 text-slate-600 border-slate-200', 'bg-slate-400'],
   GENERATING: ['Đang tạo', 'bg-sky-50 text-sky-700 border-sky-200', 'bg-sky-500 animate-pulse'],
-  AWAITING_REVIEW: ['Chờ duyệt', 'bg-amber-50 text-amber-700 border-amber-200', 'bg-amber-500'],
-  APPROVED: ['Đã duyệt', 'bg-emerald-50 text-emerald-700 border-emerald-200', 'bg-emerald-500'],
+  AWAITING_REVIEW: ['Đang lưu', 'bg-amber-50 text-amber-700 border-amber-200', 'bg-amber-500'],
+  APPROVED: ['Đang lưu', 'bg-emerald-50 text-emerald-700 border-emerald-200', 'bg-emerald-500'],
   DOWNLOADING: ['Đang lưu', 'bg-emerald-50 text-emerald-700 border-emerald-200', 'bg-emerald-500 animate-pulse'],
   SUCCESS: ['Xong', 'bg-emerald-50 text-emerald-700 border-emerald-200', 'bg-emerald-500'],
   FAILED: ['Lỗi', 'bg-rose-50 text-rose-700 border-rose-200', 'bg-rose-500'],

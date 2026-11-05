@@ -4,7 +4,7 @@
       <ListChecks class="w-5 h-5 text-indigo-500" />
       <div class="flex-1">
         <div class="card-title">Hàng đợi chi tiết <span class="count-pill ml-1">{{ jobs.length }} mục</span></div>
-        <div class="card-sub">Ảnh chạy trước theo STT, video chạy khi đủ ảnh reference đã duyệt. Tick chọn cảnh để chạy riêng.</div>
+        <div class="card-sub">Ảnh chạy trước theo STT, video chạy khi đủ ảnh reference. Tick chọn cảnh để chạy riêng.</div>
       </div>
     </div>
 
@@ -42,7 +42,7 @@
     <div v-if="selected.size" class="mx-4 mt-3 px-3 py-2 rounded-xl bg-indigo-50 border border-indigo-200 flex flex-wrap items-center gap-3 text-sm">
       <b class="text-indigo-800">Đã chọn {{ selected.size }} cảnh</b>
       <span class="text-xs text-slate-500">({{ selectedImages }} ảnh, {{ selectedVideos }} video)</span>
-      <span v-if="selectedNotRunnable" class="text-xs text-slate-500">({{ selectedNotRunnable }} cảnh đang tạo / chờ duyệt / đã xong sẽ bỏ qua)</span>
+      <span v-if="selectedNotRunnable" class="text-xs text-slate-500">({{ selectedNotRunnable }} cảnh đang tạo / đã xong sẽ bỏ qua)</span>
       <label class="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
         <input type="checkbox" v-model="onlySelected" class="accent-indigo-600" />
         chỉ chạy các cảnh này (xong thì phim tự dừng)
@@ -108,7 +108,6 @@
               <span v-else-if="j.finalPath" class="text-slate-400 font-mono break-all">{{ j.finalPath }}</span>
             </td>
             <td class="text-right whitespace-nowrap space-x-1">
-              <button v-if="j.status === 'AWAITING_REVIEW'" @click="$emit('review', j)" class="btn-warn btn-sm">Duyệt</button>
               <template v-if="canRun(j)">
                 <button @click="runOne(j, true)" :disabled="running" class="btn-primary btn-sm" title="Chỉ chạy cảnh này, xong thì phim tự dừng (không chạy cả hàng)">
                   <Play class="w-3 h-3" /> Chạy riêng
@@ -171,11 +170,10 @@ import { canRun, matchScene, parseSceneQuery } from '@/sceneFilter'
 
 const props = defineProps({ jobs: { type: Array, default: () => [] }, projectId: { type: Number, default: null },
   skipMissing: { type: Boolean, default: false } })
-const emit = defineEmits(['changed', 'review'])
+const emit = defineEmits(['changed'])
 
 const filters = [
   { key: 'all', label: 'Tất cả', statuses: null },
-  { key: 'review', label: 'Chờ duyệt', statuses: ['AWAITING_REVIEW'] },
   { key: 'running', label: 'Đang tạo', statuses: ['GENERATING'] },
   { key: 'pending', label: 'Chờ chạy', statuses: ['PENDING'] },
   { key: 'failed', label: 'Lỗi / hủy', statuses: ['FAILED', 'CANCELLED'] },

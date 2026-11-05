@@ -24,7 +24,7 @@ function save(key, value) {
  */
 export const store = reactive({
   projectId: load('afm.projectId', null),
-  view: load('afm.view', 'projects'),
+  view: ((v) => (v === 'review' ? 'scenes' : v))(load('afm.view', 'projects')),
   projects: [],
   accounts: [],
   info: null,
@@ -33,9 +33,6 @@ export const store = reactive({
 
   get current() {
     return this.projects.find((p) => p.project.id === this.projectId) || null
-  },
-  get pendingReview() {
-    return this.projects.reduce((n, p) => n + (p.counts.AWAITING_REVIEW || 0), 0)
   },
   get readyAccounts() {
     return this.accounts.filter((a) => a.status === 'READY' || a.status === 'LEASED').length

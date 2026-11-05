@@ -43,7 +43,7 @@ public class WorkerController {
     @PostMapping("/jobs/{id}/generated")
     public void generated(@PathVariable long id, @RequestBody GeneratedReport r) {
         results.onGenerated(id, r);
-        results.autoApproveIfEnabled(id);   // sau khi onGenerated đã commit
+        results.autoApprove(id);   // sau khi onGenerated đã commit
     }
 
     /** Driver Flow vừa vào / tạo dự án Flow: nhớ link cho tài khoản này. */

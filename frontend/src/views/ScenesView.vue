@@ -86,7 +86,7 @@
           <div class="flex-1 min-w-0 space-y-3">
             <div class="flex flex-wrap items-center gap-2">
               <input type="checkbox" class="accent-indigo-600 w-4 h-4" :checked="selected.has(j.id)" @change="toggle(j.id, $event.target.checked)"
-                :title="canRun(j) ? 'Chọn cảnh này' : 'Cảnh đang tạo / chờ duyệt / đã xong: sẽ bỏ qua khi chạy'" />
+                :title="canRun(j) ? 'Chọn cảnh này' : 'Cảnh đang tạo / đã xong: sẽ bỏ qua khi chạy'" />
               <span :class="j.kind === 'VIDEO' ? 'bg-violet-100 text-violet-700 border-violet-200' : 'bg-sky-100 text-sky-700 border-sky-200'"
                 class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[11px] font-semibold">
                 <component :is="j.kind === 'VIDEO' ? Video : ImageIcon" class="w-3 h-3" /> {{ j.kind === 'VIDEO' ? 'Video' : 'Ảnh' }}
@@ -121,7 +121,7 @@
                 {{ j.hasPreview ? 'Xem video' : 'Đã lưu vào folder' }}
               </div>
             </button>
-            <button v-else-if="j.inStore" @click="zoomRef(j.externalId)" title="Ảnh trong kho của phim (có sẵn hoặc đã duyệt)"
+            <button v-else-if="j.inStore" @click="zoomRef(j.externalId)" title="Ảnh trong kho của phim (có sẵn hoặc app đã tạo)"
               class="block w-full rounded-xl overflow-hidden border border-emerald-200 bg-slate-50 hover:ring-2 hover:ring-emerald-200 transition">
               <img :src="projectsApi.assetUrl(store.current.project.id, j.externalId)" loading="lazy" class="w-full h-40 object-contain" />
             </button>
@@ -130,7 +130,7 @@
             </div>
             <div class="flex gap-1.5 mt-2">
               <button v-if="j.hasPreview || j.finalPath" @click="openCompare(j)" class="btn btn-sm flex-1"><Columns2 class="w-3.5 h-3.5" /> So sánh</button>
-              <button v-if="j.status === 'AWAITING_REVIEW'" @click="approve(j)" class="btn-success btn-sm flex-1"><Check class="w-3.5 h-3.5" /> Duyệt</button>
+              <button v-if="j.status === 'AWAITING_REVIEW'" @click="approve(j)" class="btn-success btn-sm flex-1"><Check class="w-3.5 h-3.5" /> Lưu</button>
               <button v-if="['FAILED', 'CANCELLED', 'SUCCESS', 'AWAITING_REVIEW'].includes(j.status)" @click="regenerate(j)" class="btn btn-sm flex-1"
                 :title="isProvided(j) ? 'Bỏ ảnh có sẵn, cho app tạo ảnh mới từ prompt' : ''">
                 <RotateCcw class="w-3.5 h-3.5" /> Tạo lại
@@ -166,11 +166,11 @@
                 <!-- ảnh của cảnh đã tạo xong, đang chờ duyệt: duyệt luôn ở đây -->
                 <div v-if="canRun(j) && imagesToApprove(j).length" class="rounded-lg border border-amber-200 bg-amber-50 p-2 space-y-1.5">
                   <div class="text-[11px] font-semibold text-amber-800">
-                    Ảnh {{ imagesToApprove(j).map((x) => x.externalId).join(', ') }} đã tạo xong, đang chờ duyệt. Duyệt xong là tạo được video.
+                    Ảnh {{ imagesToApprove(j).map((x) => x.externalId).join(', ') }} đã tạo xong nhưng chưa lưu được vào folder. Bấm Lưu để tạo được video.
                   </div>
                   <div class="flex gap-1.5">
                     <button v-for="x in imagesToApprove(j)" :key="x.id" @click="approveImage(x)" :disabled="running" class="btn-success btn-sm flex-1">
-                      <Check class="w-3.5 h-3.5" /> Duyệt {{ x.externalId }}
+                      <Check class="w-3.5 h-3.5" /> Lưu {{ x.externalId }}
                     </button>
                     <button @click="gotoImage(imagesToApprove(j)[0].externalId)" class="btn btn-sm">Xem ảnh</button>
                   </div>
@@ -183,7 +183,7 @@
                 </div>
                 <div v-if="canRun(j)" class="text-[11px] font-semibold text-violet-700">
                   {{ imagesToCreate(j).length ? 'Tạo ảnh ' + imagesToCreate(j).map((x) => x.externalId).join(', ') + ' rồi tạo video:'
-                    : imagesToApprove(j).length || imagesGenerating(j).length ? 'Tạo video STT ' + j.seqNo + ' (chạy khi ảnh được duyệt):'
+                    : imagesToApprove(j).length || imagesGenerating(j).length ? 'Tạo video STT ' + j.seqNo + ' (chạy khi đủ ảnh):'
                     : 'Tạo video STT ' + j.seqNo + ':' }}
                 </div>
                 <div v-if="canRun(j)" class="flex gap-1.5">
@@ -194,7 +194,7 @@
                 </div>
                 <div v-else-if="j.status === 'GENERATING'" class="btn btn-sm w-full !py-1.5 opacity-70 cursor-default">Đang tạo video…</div>
                 <div v-if="canRun(j) && imagesToCreate(j).length" class="text-[11px] text-violet-700">
-                  App tạo ảnh trước; bạn duyệt ảnh xong thì video tự chạy.
+                  App tạo ảnh trước; đủ ảnh thì video tự chạy.
                 </div>
                 <div v-if="missingSource(j).length" class="text-[11px] text-rose-600">Thiếu ảnh gốc: {{ missingSource(j).join(', ') }}</div>
               </template>
@@ -218,7 +218,7 @@
           <Columns2 class="w-5 h-5 text-indigo-500" />
           <div class="flex-1 min-w-0">
             <div class="card-title">So sánh {{ compare.kind === 'VIDEO' ? 'video STT ' + compare.seqNo : 'ảnh ' + compare.externalId }}</div>
-            <div class="card-sub">Đối chiếu kết quả với ảnh reference và mô tả cảnh trước khi duyệt</div>
+            <div class="card-sub">Đối chiếu kết quả với ảnh reference và mô tả cảnh</div>
           </div>
           <StatusBadge :status="compare.status" />
           <button @click="compare = null" class="text-slate-400 hover:text-slate-700 ml-2"><X class="w-5 h-5" /></button>
@@ -255,7 +255,7 @@
             </button>
           </template>
           <button v-if="compare.status === 'AWAITING_REVIEW'" @click="regenerate(compare)" class="btn-warn"><RotateCcw class="w-4 h-4" /> Tạo lại</button>
-          <button v-if="compare.status === 'AWAITING_REVIEW'" @click="approve(compare)" class="btn-success"><Check class="w-4 h-4" /> Duyệt và lưu</button>
+          <button v-if="compare.status === 'AWAITING_REVIEW'" @click="approve(compare)" class="btn-success"><Check class="w-4 h-4" /> Lưu vào folder</button>
         </div>
       </div>
     </div>
@@ -288,7 +288,7 @@ const kinds = [
 const statusOptions = [
   { value: 'PENDING', label: 'Chờ chạy' },
   { value: 'GENERATING', label: 'Đang tạo' },
-  { value: 'AWAITING_REVIEW', label: 'Chờ duyệt' },
+  { value: 'AWAITING_REVIEW', label: 'Đang lưu' },
   { value: 'SUCCESS', label: 'Xong' },
   { value: 'FAILED', label: 'Lỗi' },
   { value: 'CANCELLED', label: 'Đã hủy / có sẵn' },
@@ -371,7 +371,7 @@ const editText = ref('')
 async function flowEdit(j) {
   try {
     await jobsApi.flowEdit(j.id, editText.value)
-    store.toast(`Đã gửi Flow sửa video STT ${j.seqNo}; bản mới sẽ về màn Duyệt`, 'success')
+    store.toast(`Đã gửi Flow sửa video STT ${j.seqNo}; bản mới sẽ tự lưu vào Folder Video`, 'success')
     editText.value = ''
     compare.value = null
     await load()
@@ -404,7 +404,7 @@ async function approveImage(x) {
   running.value = true
   try {
     await jobsApi.approve(x.id)
-    store.toast(`Đã duyệt ${x.externalId}`, 'success')
+    store.toast(`Đã lưu ${x.externalId}`, 'success')
     await load()
     store.refresh()
   } catch (e) {
@@ -415,7 +415,7 @@ async function approveImage(x) {
 }
 /** ảnh gốc còn thiếu (không có prompt tạo): phải thêm tay */
 const missingSource = (v) => (skipMissing.value ? [] : v.references.filter((r) => !r.available && !imageJobById.value.has(r.id)).map((r) => r.id))
-const statusLabel = (st) => ({ GENERATING: 'đang tạo', AWAITING_REVIEW: 'đang chờ duyệt', SUCCESS: 'đã xong', APPROVED: 'đã xong', DOWNLOADING: 'đang lưu' }[st] || st)
+const statusLabel = (st) => ({ GENERATING: 'đang tạo', AWAITING_REVIEW: 'đang lưu', SUCCESS: 'đã xong', APPROVED: 'đã xong', DOWNLOADING: 'đang lưu' }[st] || st)
 
 /** Tạo video: tạo trước các ảnh còn thiếu (panel…), rồi tới video. Video tự chạy khi các ảnh đó được duyệt. */
 function createVideo(v, only) {
@@ -429,7 +429,7 @@ async function runScenes(list, label, only, waitApprove = []) {
     const r = await projectsApi.runSelected(store.current.project.id, list.map((j) => j.id), only, true)
     const skipped = r.skipped.length ? `\nBỏ qua: ${r.skipped.slice(0, 4).join(', ')}` : ''
     store.toast(r.queued ? `Đang tạo ${label}` + (list.length > 1 ? ` (${r.queued} việc: ảnh trước, video sau)` : '')
-      + (waitApprove.length ? `. Video sẽ chạy khi bạn duyệt ${waitApprove.join(', ')}.` : '')
+      + (waitApprove.length ? `. Video sẽ chạy khi lưu xong ${waitApprove.join(', ')}.` : '')
       + (only ? ' Chỉ chạy cảnh này, xong thì phim tự dừng.' : ' Sau đó phim chạy tiếp như thường.') + skipped : `Không chạy được ${label}.` + skipped,
       r.queued ? 'success' : 'error')
     await load()
@@ -522,7 +522,7 @@ function gotoImage(id) {
 async function approve(j) {
   try {
     await jobsApi.approve(j.id)
-    store.toast(`Đã duyệt và lưu ${j.kind === 'VIDEO' ? 'video STT ' + j.seqNo : j.externalId}`, 'success')
+    store.toast(`Đã lưu ${j.kind === 'VIDEO' ? 'video STT ' + j.seqNo : j.externalId}`, 'success')
     compare.value = null
     await load()
     store.refresh()

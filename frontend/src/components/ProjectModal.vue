@@ -39,9 +39,9 @@
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <FolderInput v-model="form.imageDir" label="Folder Ảnh" placeholder="Để trống: tự tìm / tạo"
-            hint="Ảnh đã duyệt, tên = ID (CHAR-DOMINIC-1.png). Để trống thì app tự tìm trong thư mục kết quả ở trên, chưa có thì tạo mới." />
+            hint="Ảnh tạo xong được lưu ở đây, tên = ID (CHAR-DOMINIC-1.png). Để trống thì app tự tìm trong thư mục kết quả ở trên, chưa có thì tạo mới." />
           <FolderInput v-model="form.videoDir" label="Folder Video" placeholder="Để trống: tự tìm / tạo"
-            hint="Video đã duyệt, tên = mã phim + STT (tap-5-ha-cupid_001.mp4). Để trống thì app tự tìm trong thư mục kết quả ở trên, chưa có thì tạo mới." />
+            hint="Video tạo xong được lưu ở đây, tên = mã phim + STT (tap-5-ha-cupid_001.mp4). Để trống thì app tự tìm trong thư mục kết quả ở trên, chưa có thì tạo mới." />
         </div>
 
         <div>
@@ -57,30 +57,18 @@
         </div>
 
         <p class="text-[11px] text-slate-500 px-1">
-          Quy tắc bắt buộc: video chỉ được tạo khi ĐỦ ảnh tham chiếu (có sẵn hoặc đã duyệt). Thiếu ảnh nào thì app tạo ảnh đó trước.
+          Quy tắc bắt buộc: video chỉ được tạo khi ĐỦ ảnh tham chiếu (có sẵn hoặc app đã tạo). Thiếu ảnh nào thì app tạo ảnh đó trước.
         </p>
 
         <label class="flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition"
           :class="form.waitAllImages ? 'border-indigo-200 bg-indigo-50/50' : 'border-slate-200'">
           <input type="checkbox" v-model="form.waitAllImages" class="mt-0.5 w-4 h-4 accent-indigo-600" />
           <span>
-            <span class="block text-sm font-medium text-slate-700">Duyệt xong hết ảnh rồi mới tạo video</span>
+            <span class="block text-sm font-medium text-slate-700">Xong hết ảnh rồi mới tạo video</span>
             <span class="block text-[11px] text-slate-500 mt-0.5">
-              Bật: tạo và duyệt toàn bộ ảnh reference trước, sau đó mới tự upload ảnh lên Flow để tạo video.
+              Bật: tạo toàn bộ ảnh reference trước, sau đó mới tự upload ảnh lên Flow để tạo video.
               Tắt (chạy theo cảnh): ảnh có sẵn thì bỏ qua; cảnh nào đủ ảnh thì tạo video ngay; cảnh nào thiếu ảnh thì app
               tạo đúng ảnh đó trước rồi mới tạo video. Ảnh không cảnh nào cần thì không tạo.
-            </span>
-          </span>
-        </label>
-
-        <label class="flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition"
-          :class="form.autoApproveImages ? 'border-emerald-200 bg-emerald-50/50' : 'border-slate-200'">
-          <input type="checkbox" v-model="form.autoApproveImages" class="mt-0.5 w-4 h-4 accent-emerald-600" />
-          <span>
-            <span class="block text-sm font-medium text-slate-700">Tự duyệt ảnh tham chiếu</span>
-            <span class="block text-[11px] text-slate-500 mt-0.5">
-              Bật: ảnh tạo xong vào kho ảnh ngay, video cần ảnh đó chạy liền (nhiều tài khoản không phải chờ bạn duyệt).
-              Tắt: bạn xem và duyệt từng ảnh trước khi video dùng ảnh đó.
             </span>
           </span>
         </label>
@@ -152,7 +140,7 @@ const props = defineProps({ show: Boolean, project: { type: Object, default: nul
 const emit = defineEmits(['close', 'saved'])
 
 const modes = [
-  { value: 'BACKGROUND', label: 'Chạy ngầm', desc: 'Tool tự tạo, bạn chỉ duyệt', icon: Sparkles },
+  { value: 'BACKGROUND', label: 'Chạy ngầm', desc: 'Tool tự tạo và lưu vào folder', icon: Sparkles },
   { value: 'FOREGROUND', label: 'Mở Flow', desc: 'Điền sẵn, bạn tự bấm tạo', icon: MonitorPlay },
 ]
 

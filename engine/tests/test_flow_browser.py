@@ -1,4 +1,4 @@
-﻿import sys
+import sys
 import tempfile
 import unicodedata
 import unittest

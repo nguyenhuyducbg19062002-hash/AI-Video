@@ -30,7 +30,7 @@
             </div>
             <div class="flex justify-between text-[11px] text-slate-500 mt-1.5">
               <span>{{ pv.counts.SUCCESS }}/{{ pv.total }} xong · {{ pv.imagesTotal }} ảnh, {{ pv.total - pv.imagesTotal }} video</span>
-              <span v-if="pv.counts.AWAITING_REVIEW" class="text-amber-600 font-medium">{{ pv.counts.AWAITING_REVIEW }} chờ duyệt</span>
+              <span v-if="pv.counts.AWAITING_REVIEW" class="text-amber-600 font-medium">{{ pv.counts.AWAITING_REVIEW }} đang lưu</span>
             </div>
           </button>
         </div>
@@ -68,8 +68,8 @@
           </div>
           <div v-if="current.total > 0 && current.imagesDone < current.imagesTotal" class="note-info">
             <template v-if="current.project.waitAllImages !== false">
-              Giai đoạn 1 – ảnh: duyệt xong toàn bộ {{ current.imagesTotal }} ảnh thì app mới chuyển sang tạo video
-              ({{ current.imagesDone }}/{{ current.imagesTotal }} ảnh đã duyệt).
+              Giai đoạn 1 – ảnh: xong toàn bộ {{ current.imagesTotal }} ảnh thì app mới chuyển sang tạo video
+              ({{ current.imagesDone }}/{{ current.imagesTotal }} ảnh đã có).
             </template>
             <template v-else>
               Chạy theo cảnh: cảnh đủ ảnh thì tạo video ngay; cảnh thiếu ảnh thì tạo đúng ảnh đó trước rồi mới tạo video
@@ -77,12 +77,12 @@
             </template>
           </div>
           <div v-else-if="current.total > current.imagesTotal && current.imagesTotal > 0" class="note-info">
-            Giai đoạn 2 – video: ảnh đã duyệt xong, app tự upload ảnh reference lên Flow theo đúng thứ tự từng cảnh rồi tạo video.
+            Giai đoạn 2 – video: đã đủ ảnh, app tự upload ảnh reference lên Flow theo đúng thứ tự từng cảnh rồi tạo video.
           </div>
           <div v-if="current.project.runMode === 'FOREGROUND' && current.counts.GENERATING > 0" class="note-warn">
             <b>Đang chờ bạn thao tác trên cửa sổ Google Flow.</b> Làm theo hộp hướng dẫn ở góc phải dưới của cửa sổ Flow:
             mở/tạo dự án → gắn ảnh theo thứ tự (thư mục ảnh đánh số đã được mở sẵn) → Copy prompt, dán, bấm Tạo →
-            bấm <b>Tải xuống</b>: app tự lưu và chuyển sang màn Duyệt. Đóng cửa sổ Flow = bỏ qua cảnh đó.
+            bấm <b>Tải xuống</b>: app tự lưu vào Folder Video. Đóng cửa sổ Flow = bỏ qua cảnh đó.
           </div>
 
           <div class="grid grid-cols-3 gap-2">
@@ -140,13 +140,10 @@
               <Play class="w-4 h-4" /> Chạy
             </button>
             <button v-else @click="pause" :disabled="busy" class="btn-warn"><Pause class="w-4 h-4" /> Tạm dừng</button>
-            <button v-if="current.counts.AWAITING_REVIEW" @click="store.go('review')" class="btn-success col-span-2">
-              <CheckCircle2 class="w-4 h-4" /> Duyệt {{ current.counts.AWAITING_REVIEW }} mục đang chờ
-            </button>
             <button v-if="current.counts.FAILED + current.counts.CANCELLED > 0" @click="retryFailed" :disabled="busy" class="btn">
               <RotateCcw class="w-4 h-4" /> Thử lại mục lỗi
             </button>
-            <button @click="verifyFiles" :disabled="busy" class="btn" title="Tìm file đã duyệt bị mất/hỏng trong Folder Ảnh/Video và cho tạo lại">
+            <button @click="verifyFiles" :disabled="busy" class="btn" title="Tìm file đã lưu bị mất/hỏng trong Folder Ảnh/Video và cho tạo lại">
               <ShieldCheck class="w-4 h-4" /> Kiểm tra file thiếu/hỏng
             </button>
             <button @click="remove" class="btn-danger"><Trash2 class="w-4 h-4" /> Xóa phim</button>
@@ -171,7 +168,7 @@
           <span class="text-slate-500">Nền tảng: <b class="text-slate-700 font-medium">{{ providerLabel(current.project.provider) }}</b></span>
           <span class="text-slate-500">Song song: <b class="text-slate-700 font-medium">{{ current.project.maxParallel }}</b></span>
           <span class="text-slate-500">Số lần thử: <b class="text-slate-700 font-medium">{{ current.project.maxAttempts }}</b></span>
-          <label class="flex items-center gap-2 cursor-pointer select-none" title="Bật: chạy theo cảnh. Ảnh có sẵn thì bỏ qua; cảnh nào thiếu ảnh thì tạo đúng ảnh đó trước rồi mới tạo video; không đợi duyệt hết ảnh của cả phim">
+          <label class="flex items-center gap-2 cursor-pointer select-none" title="Bật: chạy theo cảnh. Ảnh có sẵn thì bỏ qua; cảnh nào thiếu ảnh thì tạo đúng ảnh đó trước rồi mới tạo video; không đợi xong hết ảnh của cả phim">
             <button type="button" role="switch" :aria-checked="current.project.waitAllImages === false" @click="toggleVideoEarly" :disabled="busy"
               :class="current.project.waitAllImages === false ? 'bg-emerald-500' : 'bg-slate-300'"
               class="relative inline-flex h-5 w-9 shrink-0 rounded-full transition">
@@ -179,24 +176,14 @@
                 class="inline-block h-4 w-4 mt-0.5 rounded-full bg-white shadow transition"></span>
             </button>
             <span class="text-slate-700 font-medium">Tạo video ngay khi đủ ảnh của cảnh</span>
-            <span class="text-[11px] text-slate-400">{{ current.project.waitAllImages === false ? '(đang bật: không đợi duyệt hết ảnh)' : '(đang tắt: video đợi duyệt hết ảnh của phim)' }}</span>
-          </label>
-          <label class="flex items-center gap-2 cursor-pointer select-none" title="Bật: ảnh tham chiếu tạo xong vào kho ảnh ngay, video cần ảnh đó chạy liền không đợi bạn duyệt">
-            <button type="button" role="switch" :aria-checked="!!current.project.autoApproveImages" @click="toggleAutoApprove" :disabled="busy"
-              :class="current.project.autoApproveImages ? 'bg-emerald-500' : 'bg-slate-300'"
-              class="relative inline-flex h-5 w-9 shrink-0 rounded-full transition">
-              <span :class="current.project.autoApproveImages ? 'translate-x-4' : 'translate-x-0.5'"
-                class="inline-block h-4 w-4 mt-0.5 rounded-full bg-white shadow transition"></span>
-            </button>
-            <span class="text-slate-700 font-medium">Tự duyệt ảnh tham chiếu</span>
-            <span class="text-[11px] text-slate-400">{{ current.project.autoApproveImages ? '(đang bật)' : '(đang tắt: bạn duyệt từng ảnh)' }}</span>
+            <span class="text-[11px] text-slate-400">{{ current.project.waitAllImages === false ? '(đang bật: không đợi xong hết ảnh)' : '(đang tắt: video đợi xong hết ảnh của phim)' }}</span>
           </label>
         </div>
         <button @click="openModal(current.project)" class="btn btn-sm ml-auto"><Pencil class="w-3.5 h-3.5" /> Sửa</button>
       </div>
     </section>
 
-    <JobTable v-if="current" :jobs="jobs" :project-id="current.project.id" :skip-missing="!!current.project.skipMissingRefs" @changed="reload" @review="store.go('review')" />
+    <JobTable v-if="current" :jobs="jobs" :project-id="current.project.id" :skip-missing="!!current.project.skipMissingRefs" @changed="reload" />
 
     <ProjectModal :show="showModal" :project="editing" @close="showModal = false" @saved="onSaved" />
     <ImportToolsModal :show="!!tools" :mode="tools || 'text'" :project-id="current?.project.id" @close="tools = null" @done="onToolsDone" />
@@ -228,7 +215,6 @@ const stats = computed(() => {
   return [
     { key: 'pending', label: 'Chờ chạy', value: c.PENDING ?? 0, color: 'text-slate-500' },
     { key: 'gen', label: 'Đang tạo', value: c.GENERATING ?? 0, color: 'text-sky-600' },
-    { key: 'review', label: 'Chờ duyệt', value: c.AWAITING_REVIEW ?? 0, color: 'text-amber-600' },
     { key: 'done', label: 'Xong', value: (c.SUCCESS ?? 0) + (c.APPROVED ?? 0) + (c.DOWNLOADING ?? 0), color: 'text-emerald-600' },
     { key: 'failed', label: 'Lỗi', value: c.FAILED ?? 0, color: 'text-rose-600' },
     { key: 'cancelled', label: 'Có sẵn / đã hủy', value: c.CANCELLED ?? 0, color: 'text-slate-500' },
@@ -333,12 +319,6 @@ function formOf(p, changes) {
 }
 
 /** Công tắc "Tự duyệt ảnh tham chiếu": ảnh tạo xong vào kho ngay, video cần ảnh đó chạy liền */
-function toggleAutoApprove() {
-  const on = !current.value.project.autoApproveImages
-  return run(() => projectsApi.update(id(), formOf(current.value.project, { autoApproveImages: on })), on
-    ? 'Đã bật: ảnh tạo xong được duyệt tự động'
-    : 'Đã tắt: bạn duyệt từng ảnh trước khi video dùng')
-}
 
 /** Công tắc "Tạo video ngay khi đủ ảnh của cảnh" (= tắt "duyệt xong hết ảnh rồi mới tạo video") */
 function toggleVideoEarly() {
@@ -346,14 +326,14 @@ function toggleVideoEarly() {
   const early = p.waitAllImages === false
   const form = formOf(p, { waitAllImages: early })
   return run(() => projectsApi.update(id(), form), early
-    ? 'Video sẽ đợi duyệt hết ảnh của phim rồi mới chạy'
-    : 'Duyệt xong ảnh của cảnh nào thì video cảnh đó chạy luôn')
+    ? 'Video sẽ đợi xong hết ảnh của phim rồi mới chạy'
+    : 'Đủ ảnh của cảnh nào thì video cảnh đó chạy luôn')
 }
 const pause = () => run(() => projectsApi.pause(id()), 'Đã tạm dừng: job đang tạo sẽ chạy nốt, không giao job mới')
 const retryFailed = () => run(() => projectsApi.retryFailed(id()), (r) => `Đã đưa ${r.requeued} mục về hàng đợi`)
 const verifyFiles = () => run(() => projectsApi.verifyFiles(id()), (r) => r.requeued
   ? `Đã kiểm tra ${r.checked} file: ${r.missing} mất, ${r.broken} hỏng → đưa ${r.requeued} mục về hàng đợi tạo lại.\n${r.details.join('\n')}`
-  : `Đã kiểm tra ${r.checked} file đã duyệt: tất cả đều ổn.`)
+  : `Đã kiểm tra ${r.checked} file đã lưu: tất cả đều ổn.`)
 
 async function remove() {
   if (!confirm(`Xóa phim "${current.value.project.name}" khỏi ứng dụng?\nFile ảnh/video đã lưu trong 2 folder KHÔNG bị xóa.`)) return

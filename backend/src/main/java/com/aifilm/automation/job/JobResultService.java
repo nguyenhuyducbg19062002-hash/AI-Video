@@ -23,6 +23,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Objects;
 
 @Service
@@ -77,21 +78,30 @@ public class JobResultService {
     }
 
     /**
-     * Phim bật "tự duyệt ảnh": ảnh vừa tạo xong được duyệt luôn (video cần ảnh này mới chạy được).
-     * Chạy SAU khi onGenerated đã commit, trong transaction riêng: lỗi ghi file chỉ để ảnh ở trạng thái chờ duyệt, không mất kết quả.
+     * App không còn bước "Duyệt kết quả" (người dùng xem và sửa trực tiếp trên Flow): ảnh / video vừa tạo xong được lưu
+     * luôn vào Folder Ảnh / Folder Video với đúng tên. Muốn làm lại thì bấm "Tạo lại" ở Danh sách cảnh.
+     * Chạy SAU khi onGenerated đã commit, trong transaction riêng: lỗi ghi file chỉ để mục ở trạng thái chờ, không mất kết quả
+     * (lần mở app sau sẽ lưu lại).
      */
-    public void autoApproveIfEnabled(long jobId) {
+    public void autoApprove(long jobId) {
         try {
             JobEntity job = jobs.findById(jobId).orElse(null);
-            if (job == null || job.getKind() != com.aifilm.automation.prompt.PromptKind.IMAGE
-                    || job.getStatus() != JobStatus.AWAITING_REVIEW) {
-                return;
-            }
-            if (projects.findById(job.getProjectId()).map(ProjectEntity::isAutoApproveImagesOn).orElse(false)) {
+            if (job != null && job.getStatus() == JobStatus.AWAITING_REVIEW) {
                 review.approve(jobId);
             }
         } catch (Exception e) {
-            log.warn("Job {}: tự duyệt ảnh không được ({}), để chờ duyệt tay", jobId, e.getMessage());
+            log.warn("Job {}: không tự lưu kết quả được ({})", jobId, e.getMessage());
+        }
+    }
+
+    /** Kết quả còn "chờ duyệt" từ bản app cũ (hoặc lưu lỗi lần trước): lưu luôn khi mở app. */
+    @EventListener(ApplicationReadyEvent.class)
+    @Order(1)
+    public void saveLeftoverResults() {
+        List<JobEntity> left = jobs.findByStatus(JobStatus.AWAITING_REVIEW);
+        left.forEach(j -> autoApprove(j.getId()));
+        if (!left.isEmpty()) {
+            log.info("Mở app: tự lưu {} kết quả còn chờ duyệt", left.size());
         }
     }
 

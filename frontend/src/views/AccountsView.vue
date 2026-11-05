@@ -117,7 +117,7 @@
             <input v-model.number="form.maxConcurrent" type="number" min="1" max="5" class="input !w-28" />
             <p class="hint">
               <b>1</b> = chạy lần lượt như cũ. Từ <b>2</b> trở lên: trong lúc Flow đang tạo lệnh này, app gửi tiếp các lệnh sau trên cùng tài khoản;
-              lệnh nào xong trước thì tải về và chuyển sang "Chờ duyệt" trước. Đã thử ổn với gói ULTRA (3 lệnh); gói khác chưa thử, nên tăng từ từ.
+              lệnh nào xong trước thì tải về và lưu vào folder trước. Đã thử ổn với gói ULTRA (3 lệnh); gói khác chưa thử, nên tăng từ từ.
               Gửi dồn nhiều lệnh một tài khoản làm hết lượt nhanh hơn và dễ bị Google để ý hơn.
               Nhớ nâng ô "Song song" của phim (tổng số lệnh chạy cùng lúc của cả phim) cho đủ.
             </p>

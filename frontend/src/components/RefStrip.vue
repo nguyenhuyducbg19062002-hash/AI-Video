@@ -45,7 +45,7 @@
     <p v-if="toCreate.length" class="text-[11px] text-indigo-600 mt-1">
       Chờ {{ toCreate.join(', ') }}:
       {{ toCreate.every(isScene) ? 'khung cảnh này (tờ 4 khung hình)' : toCreate.some(isScene) ? 'khung cảnh và ảnh này' : 'ảnh này' }}
-      được tạo ở tab <b>Tạo ảnh</b> (từ file prompt ảnh). Duyệt xong thì cảnh này tự chạy.
+      được tạo ở tab <b>Tạo ảnh</b> (từ file prompt ảnh). Tạo xong thì cảnh này tự chạy.
     </p>
     <p v-if="missing.length" class="text-[11px] text-rose-600 mt-1">
       Thiếu {{ missing.join(', ') }}: không có prompt tạo ảnh này và chưa có file. Bấm "Thêm ảnh có sẵn" hoặc nút "+".
@@ -76,7 +76,7 @@ const missing = computed(() => props.job.references.filter((r) => !r.available &
 const isScene = (id) => String(id).startsWith('PANEL-')
 
 const PRODUCER = {
-  PENDING: 'chờ tạo', GENERATING: 'đang tạo', AWAITING_REVIEW: 'chờ duyệt', APPROVED: 'đang lưu',
+  PENDING: 'chờ tạo', GENERATING: 'đang tạo', AWAITING_REVIEW: 'đang lưu', APPROVED: 'đang lưu',
   DOWNLOADING: 'đang lưu', SUCCESS: 'xong', FAILED: 'tạo lỗi', CANCELLED: 'đã hủy',
 }
 const producerLabel = (s) => PRODUCER[s] || s
