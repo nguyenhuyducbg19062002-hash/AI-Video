@@ -33,7 +33,9 @@ Tóm tắt nhanh:
 1. **Nhìn trước khi sửa.** Chụp màn hình màn hình liên quan (xem "Kiểm tra bằng ảnh chụp") hoặc xem ảnh người dùng gửi. Ghi ra 3–5 vấn đề cụ thể theo các nguyên tắc ở trên (ví dụ: "banner chiếm 120px không có thông tin", "4 nút cùng màu đậm"). Đừng sửa theo cảm tính.
 2. **Sửa từ gốc ra ngọn:** biến màu / thành phần trong `main.css` → khung app (`App.vue`) → từng màn (`views/*.vue`) → thành phần nhỏ (`components/*.vue`). Sửa ở gốc thì mọi màn đẹp lên cùng lúc và giữ được nhất quán.
 3. **Không đổi hành vi.** Làm giao diện không được đổi logic, API, tên sự kiện hay dữ liệu. Chỉ đổi template / class / CSS; nếu cần đổi bố cục thì giữ nguyên mọi nút và chức năng đang có (người dùng quen chỗ bấm). Chữ hiển thị chỉ sửa khi nó sai, dài hoặc khó hiểu.
-4. **Build và chụp lại** để so trước/sau; sửa tiếp những chỗ lệch. Kiểm tra ở hai cỡ cửa sổ 1366×768 và 1920×1080.
+4. **Build và chụp lại** để so trước/sau; sửa tiếp những chỗ lệch. App chạy trong cửa sổ có thể kéo nhỏ, nên kiểm tra
+   ở 1920×1080, 1366×768, 1100×760 (thanh bên thu gọn) và 600×900 (thanh bên thành ngăn kéo); quy tắc responsive ở
+   `references/design-system.md` mục "Responsive".
 5. **Báo lại cho người dùng** bằng ảnh trước/sau và danh sách thay đổi ngắn, bằng tiếng Việt, không thuật ngữ.
 
 ## Kiểm tra bằng ảnh chụp

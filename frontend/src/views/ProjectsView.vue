@@ -85,7 +85,7 @@
             bấm <b>Tải xuống</b>: app tự lưu vào Folder Video. Đóng cửa sổ Flow = bỏ qua cảnh đó.
           </div>
 
-          <div class="grid grid-cols-3 gap-2">
+          <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
             <div v-for="s in stats" :key="s.key" class="rounded-xl border border-slate-200 px-3 py-2">
               <div class="text-[11px] font-medium" :class="s.color">{{ s.label }}</div>
               <div class="text-xl font-semibold text-slate-800">{{ s.value }}</div>
@@ -112,7 +112,7 @@
             title="Chọn thư mục phim (ví dụ D:\Dev\Tập 5. Hà - Cupid): app tự tìm file prompt ảnh/video (.xlsx, .txt) và ảnh có sẵn bên trong">
             <FolderOpen class="w-4 h-4" /> Nạp cả thư mục phim (Excel / .txt + ảnh có sẵn)
           </button>
-          <div class="grid grid-cols-3 gap-2">
+          <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
             <label class="btn cursor-pointer" :class="{ 'opacity-50 pointer-events-none': busy }" title="reference-prompts.xlsx / prompt-anh-panel.xlsx / .txt mỗi dòng 1 prompt">
               <ImageIcon class="w-4 h-4" /> Thêm file ảnh
               <input type="file" accept=".xlsx,.txt" class="hidden" @change="importExcel($event, 'IMAGE')" />

@@ -83,7 +83,7 @@
             </select>
             <p class="hint">Prompt Omni dùng tới 7 ảnh reference: nên dùng Google Flow.</p>
           </div>
-          <div class="grid grid-cols-3 gap-3">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label class="label">Song song</label>
               <input v-model.number="form.maxParallel" type="number" min="1" max="20" class="input" title="Số cảnh chạy cùng lúc; tối đa bằng số tài khoản sẵn sàng (mỗi tài khoản một cửa sổ)" />
@@ -101,7 +101,7 @@
           </div>
         </div>
 
-        <div class="grid grid-cols-2 gap-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label class="label">Độ dài video</label>
             <select v-model="form.videoDuration" class="input">

@@ -1,24 +1,27 @@
 <template>
   <div class="space-y-4">
-    <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
       <div v-for="s in summary" :key="s.status" class="card px-4 py-3">
         <StatusBadge :status="s.status" />
-        <div class="text-2xl font-semibold text-slate-800 mt-1.5">{{ s.count }}</div>
+        <div class="stat-value">{{ s.count }}</div>
       </div>
     </div>
 
     <section class="card">
-      <div class="card-head items-center">
-        <Users class="w-5 h-5 text-indigo-500" />
-        <div class="flex-1">
-          <div class="card-title">Danh sách tài khoản <span class="count-pill ml-1">{{ store.accounts.length }}</span></div>
+      <!-- Cửa sổ hẹp: nút xuống dòng dưới tiêu đề thay vì bóp tiêu đề -->
+      <div class="card-head flex-wrap items-center gap-y-3">
+        <Users class="w-5 h-5 text-slate-400 shrink-0" />
+        <div class="flex-1 min-w-[220px]">
+          <div class="card-title whitespace-nowrap">Danh sách tài khoản <span class="count-pill ml-1">{{ store.accounts.length }}</span></div>
           <div class="card-sub">Ưu tiên nhỏ được dùng trước. Hết quota thì job tự chuyển sang tài khoản kế tiếp.</div>
         </div>
-        <button @click="checkAll" :disabled="checkingAll" class="btn mr-2"
-          title="Tự mở Edge ẩn kiểm tra từng tài khoản Flow đã đăng nhập chưa rồi cập nhật trạng thái">
-          <RotateCcw class="w-4 h-4" :class="checkingAll ? 'animate-spin' : ''" /> Kiểm tra đăng nhập
-        </button>
-        <button @click="openModal(null)" class="btn-primary"><Plus class="w-4 h-4" /> Thêm tài khoản</button>
+        <div class="flex gap-2 shrink-0">
+          <button @click="checkAll" :disabled="checkingAll" class="btn"
+            title="Tự mở Edge ẩn kiểm tra từng tài khoản Flow đã đăng nhập chưa rồi cập nhật trạng thái">
+            <RotateCcw class="w-4 h-4" :class="checkingAll ? 'animate-spin' : ''" /> Kiểm tra đăng nhập
+          </button>
+          <button @click="openModal(null)" class="btn-primary"><Plus class="w-4 h-4" /> Thêm tài khoản</button>
+        </div>
       </div>
 
       <div class="overflow-x-auto">
@@ -42,8 +45,8 @@
             </tr>
             <tr v-for="a in store.accounts" :key="a.id">
               <td class="font-mono text-xs text-slate-500">{{ a.priority }}</td>
-              <td>
-                <div class="font-medium text-slate-900 break-all">{{ a.email }}</div>
+              <td class="min-w-[200px]">
+                <div class="font-medium text-slate-900 [overflow-wrap:anywhere]">{{ a.email }}</div>
                 <div class="text-[11px] text-slate-500 mt-0.5">{{ providerLabel(a.provider) }}</div>
                 <div v-if="a.proxy" class="text-[11px] font-mono text-indigo-600 mt-0.5">proxy {{ a.proxy }}</div>
                 <div v-if="a.maxConcurrent > 1" class="text-[11px] text-emerald-700 mt-0.5">chạy {{ a.maxConcurrent }} lệnh cùng lúc</div>
@@ -99,7 +102,7 @@
               name="afm-account-email" autocomplete="off" />
             <p class="hint">App không cần và không lưu mật khẩu Google: bạn tự đăng nhập một lần bằng nút "Đăng nhập".</p>
           </div>
-          <div class="grid grid-cols-2 gap-3">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label class="label">Nền tảng</label>
               <select v-model="form.provider" :disabled="!!editing" class="input">
@@ -135,7 +138,7 @@
               <label class="label">File service-account JSON</label>
               <input v-model="form.credentialFile" class="input font-mono" placeholder="D:\keys\project-sa.json" />
             </div>
-            <div class="grid grid-cols-2 gap-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div><label class="label">GCP project</label><input v-model="form.gcpProject" class="input font-mono" /></div>
               <div><label class="label">Vùng (location)</label><input v-model="form.gcpLocation" class="input font-mono" placeholder="us-central1" /></div>
             </div>

@@ -68,6 +68,25 @@ Dòng có dấu tiếng Việt cần `leading-snug` trở lên; đừng dùng `l
 - Thanh bên cố định, không cuộn theo nội dung. Thanh trên cao ~64px, nền trắng, viền dưới.
 - Không có banner to: tiêu đề + mô tả + bước (Tài khoản → Phim → Lưu) nằm gọn trong thanh trên.
 
+### Responsive (cửa sổ Edge hay bị thu nhỏ / chia đôi màn hình)
+
+Khung app đổi theo media query trong `main.css` (khối "Khung app responsive"):
+
+| Bề rộng cửa sổ | Thanh bên | Thanh trên | Lề nội dung |
+|---|---|---|---|
+| ≥ 1920px | đầy đủ 232px | mô tả + 3 bước + trạng thái | 32px, rộng tối đa 1760px |
+| 1280 – 1919px | đầy đủ 232px | mô tả + 3 bước + trạng thái | 24px, rộng tối đa 1600px |
+| 768 – 1279px | chỉ icon 72px (`title` hiện tên khi rê chuột) | ô chọn phim chuyển lên đây, ẩn 3 bước | 20px |
+| < 768px | ngăn kéo, mở bằng nút ☰, đóng khi chọn màn / bấm nền mờ / Esc | chỉ tiêu đề + chấm trạng thái + số tài khoản | 12px |
+
+Trong từng màn dùng tiền tố Tailwind (cũng là media query `min-width`): viết cho màn hẹp trước rồi mở rộng, ví dụ
+`grid-cols-1 sm:grid-cols-2 lg:grid-cols-5`, `flex-col lg:flex-row`. Quy tắc:
+- Không lưới nào cố định ≥ 3 cột mà không có bậc nhỏ hơn.
+- Phần đầu card có nút: `flex-wrap` + khối chữ `min-w-[220px]` để nút xuống dòng thay vì bóp tiêu đề.
+- Bảng rộng nằm trong `overflow-x-auto`; cột chữ dài đặt `min-w-[…]` + `[overflow-wrap:anywhere]` (không dùng `break-all`: chữ bị ngắt vụn).
+- Ẩn bớt bằng class mang nghĩa (`.topbar-desc`, `.nav-label`) trong media query, không xóa chức năng: mọi nút vẫn bấm được ở mọi cỡ.
+- Kiểm tra bằng `chup_man_hinh.py --size` ở 1920x1080, 1366x768, 1100x760 và 600x900.
+
 ## 5. Thành phần dùng chung (`main.css`)
 
 | Lớp | Khi nào dùng |

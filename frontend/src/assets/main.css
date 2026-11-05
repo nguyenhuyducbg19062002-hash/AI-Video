@@ -167,6 +167,126 @@
   }
 }
 
+/*
+ * ===== Khung app responsive (CSS media queries) =====
+ * App chạy trong cửa sổ Edge nên người dùng hay thu nhỏ / chia đôi màn hình. Ba cỡ:
+ *   ≥ 1280px      : thanh bên đầy đủ 232px, thanh trên hiện mô tả + 3 bước.
+ *   768 – 1279px  : thanh bên thu gọn còn icon (72px), ô chọn phim chuyển lên thanh trên, ẩn 3 bước.
+ *   < 768px       : thanh bên thành ngăn kéo (nút ☰ ở thanh trên), thanh trên chỉ còn tiêu đề + trạng thái rút gọn.
+ *   ≥ 1920px      : nội dung được rộng hơn, lề lớn hơn.
+ */
+.app-sidebar {
+  width: 232px;
+  transition: width 0.2s ease, transform 0.2s ease;
+}
+.app-content {
+  max-width: 1600px;
+  padding: 24px;
+}
+.nav-toggle,
+.topbar-project,
+.sidebar-backdrop {
+  display: none;
+}
+
+@media (max-width: 1279.98px) {
+  .topbar-steps {
+    display: none;
+  }
+  .app-content {
+    padding: 20px;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1279.98px) {
+  .app-sidebar {
+    width: 72px;
+  }
+  .app-sidebar .brand-text,
+  .app-sidebar .nav-label,
+  .app-sidebar .sidebar-project,
+  .app-sidebar .sidebar-queue {
+    display: none;
+  }
+  .app-sidebar .brand {
+    justify-content: center;
+    padding: 0;
+  }
+  .app-sidebar .nav-item,
+  .app-sidebar .foot-item {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .topbar-project {
+    display: block;
+  }
+}
+
+@media (max-width: 767.98px) {
+  .app-sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 50;
+    width: min(280px, 85vw);
+    transform: translateX(-100%);
+  }
+  .app-sidebar.is-open {
+    transform: none;
+    box-shadow: 0 20px 50px rgba(2, 6, 23, 0.45);   /* chỉ khi mở: lúc ẩn bóng sẽ lộ vệt mờ ở mép trái */
+  }
+  .sidebar-backdrop.is-open {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    background: rgba(15, 23, 42, 0.45);
+  }
+  .nav-toggle {
+    display: inline-flex;
+  }
+  .app-topbar {
+    gap: 10px;
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+  .topbar-desc,
+  .topbar-label {
+    display: none;
+  }
+  .topbar-status {
+    padding-left: 10px;
+    gap: 10px;
+  }
+  .page-title {
+    font-size: 16px;
+  }
+  .app-content {
+    padding: 12px;
+  }
+  /* bảng rộng: cuộn ngang trong card thay vì làm vỡ trang */
+  .table th,
+  .table td {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+}
+
+@media (min-width: 1920px) {
+  .app-content {
+    max-width: 1760px;
+    padding: 32px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-sidebar {
+    transition: none;
+  }
+}
+
 /* Thanh cuộn mảnh */
 ::-webkit-scrollbar {
   width: 10px;
