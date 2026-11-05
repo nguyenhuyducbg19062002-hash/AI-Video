@@ -17,8 +17,10 @@ import logging
 import os
 import re
 import time
+import unicodedata
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
@@ -30,6 +32,7 @@ from .flow_session import SessionRunner, Tile
 from .helper_overlay import open_in_explorer, overlay_script, prepare_refs_folder
 
 FLOW_URL = "https://flow.google.com/"
+VIDEO_QUALITIES = ["1080p", "720p", "480p", "360p"]   # từ cao xuống thấp
 DEFAULT_VIDEO_QUALITY = "720p"   # phim không đặt chất lượng thì dùng 720p; người dùng đổi ở phần Phim
 log = logging.getLogger("flow")
 
@@ -46,7 +49,24 @@ def parse_proxy(p: str | None):
     if len(parts) == 4 and "://" not in p:  # ip:port:user:pass
         ip, port, user, pwd = parts
         return {"server": f"http://{ip}:{port}", "username": user, "password": pwd}
-    return {"server": p if "://" in p else f"http://{p}"}
+    u = urlparse(p if "://" in p else f"http://{p}")
+    try:
+        port = u.port
+    except ValueError:
+        port = None
+    if not u.hostname:
+        return {"server": p if "://" in p else f"http://{p}"}
+    cfg = {"server": f"{u.scheme}://{u.hostname}" + (f":{port}" if port else "")}
+    if u.username:
+        cfg["username"] = unquote(u.username)
+        cfg["password"] = unquote(u.password or "")
+    return cfg
+
+
+def proxy_label(p: str | None) -> str:
+    """Chỉ host:port của proxy để ghi log / báo lỗi (không bao giờ có user:pass)."""
+    cfg = parse_proxy(p)
+    return cfg["server"].split("://", 1)[-1] if cfg else ""
 
 
 _PROJECT_RE = re.compile(r"^(https://flow\.google\.com/project/[0-9a-fA-F-]{36})")
@@ -309,6 +329,10 @@ class FlowBrowserDriver:
     def _browser(self, account: dict, headless: bool):
         if not account.get("profileDir"):
             raise ConfigError(f"Tài khoản {account.get('email')} chưa có thư mục profile")
+        cfg = parse_proxy(account.get("proxy"))
+        if cfg and cfg["server"].startswith("socks5") and cfg.get("username"):
+            raise AccountBroken(f"Proxy \"{proxy_label(account.get('proxy'))}\": Chromium không hỗ trợ socks5 có user/pass. "
+                                "Đổi sang proxy http hoặc socks5 không mật khẩu")
         with sync_playwright() as pw:
             try:
                 ctx = pw.chromium.launch_persistent_context(
@@ -327,8 +351,8 @@ class FlowBrowserDriver:
                     # thường là cửa sổ đăng nhập của tài khoản còn mở: không tính lượt thử, đưa tài khoản về "Cần đăng nhập"
                     raise AuthRequired(f"Profile của {account['email']} đang mở ở một cửa sổ Edge khác (cửa sổ đăng nhập?). "
                                        "Đóng cửa sổ đó rồi bấm \"Đã đăng nhập xong\"") from e
-                if proxy_error(msg) or "proxy" in msg.lower():
-                    raise AccountBroken(f"Proxy \"{account.get('proxy')}\" không dùng được: {msg[:200]}") from e
+                if proxy_error(msg):
+                    raise AccountBroken(f"Proxy \"{proxy_label(account.get('proxy'))}\" không dùng được: {proxy_error(msg)}") from e
                 raise TransientError(f"Không mở được Edge: {msg[:500]}") from e
             try:
                 yield ctx
@@ -350,7 +374,7 @@ class FlowBrowserDriver:
             code = proxy_error(str(e))
             if code:
                 # proxy của tài khoản sai / chết: thử lại trên tài khoản này vô ích → backend tắt tài khoản, xoay tài khoản khác
-                raise AccountBroken(f"Proxy \"{job['account'].get('proxy')}\" không kết nối được ({code}). "
+                raise AccountBroken(f"Proxy \"{proxy_label(job['account'].get('proxy'))}\" không kết nối được ({code}). "
                                     "Sửa hoặc xóa proxy của tài khoản") from e
             raise TransientError(f"Không mở được trang Flow: {str(e)[:300]}") from e
         if "accounts.google.com" in page.url:
@@ -376,7 +400,7 @@ class FlowBrowserDriver:
             return
         if not _is_todo(s.get("duration_menu")):
             page.locator(s["duration_menu"]).first.click()
-        page.locator(option.replace("{seconds}", str(seconds))).first.click()
+        page.locator(option.replace("{seconds}", str(int(seconds)))).first.click()
 
     @staticmethod
     def _chip_matches(btn, job: dict) -> bool:
@@ -469,7 +493,15 @@ class FlowBrowserDriver:
         lb = page.locator(s["ingredient_listbox"])
         return lb.first.inner_text() if lb.count() else ""
 
-    def _upload_refs(self, page, s: dict, images: list[str]) -> bool:
+    @staticmethod
+    def _nfc(text: str) -> str:
+        return unicodedata.normalize("NFC", text).strip()
+
+    def _listbox_names(self, page, s: dict) -> set[str]:
+        lb = page.locator(s["ingredient_listbox"])
+        return {self._nfc(x) for x in lb.first.locator("span").all_inner_texts()} if lb.count() else set()
+
+    def _upload_refs(self, page, s: dict, images: list[str], should_stop=None) -> bool:
         """
         Tải lên dự án Flow những ảnh reference CHƯA có (so theo tên file; Flow giữ nguyên tên file khi tải lên).
         Nút "+" cạnh ô prompt mở bảng thành phần; "Tải nội dung nghe nhìn lên" mở hộp chọn file (chọn nhiều file một lần).
@@ -479,14 +511,16 @@ class FlowBrowserDriver:
                 raise Rejected(f"Thiếu file ảnh reference: {img}")
         if not images:
             return False
+        if should_stop and should_stop():
+            raise Cancelled("Người dùng hủy job")
         page.locator(s["add_reference_button"]).first.click()
         try:
             page.locator(s["ingredient_listbox"]).first.wait_for(state="visible", timeout=4_000)
         except PlaywrightTimeout:
             pass
         page.wait_for_timeout(500)   # danh sách thành phần nạp nội dung chậm hơn khung một chút
-        have = self._listbox_text(page, s)
-        need = [img for img in images if Path(img).name not in have]
+        have = self._listbox_names(page, s)
+        need = [img for img in images if self._nfc(Path(img).name) not in have]
         if need:
             log.info("Tải lên Flow %d ảnh: %s", len(need), ", ".join(Path(i).name for i in need))
             with page.expect_file_chooser() as fc:
@@ -495,9 +529,12 @@ class FlowBrowserDriver:
             uploading = s.get("uploading_texts") or ["Đang tải lên", "Uploading"]
             deadline = time.monotonic() + 180
             while True:
+                if should_stop and should_stop():
+                    raise Cancelled("Người dùng hủy job")
                 page.wait_for_timeout(1_000)
                 text = self._listbox_text(page, s)
-                if not any(u in text for u in uploading) and all(Path(i).name in text for i in need):
+                names = self._listbox_names(page, s)
+                if not any(u in text for u in uploading) and all(self._nfc(Path(i).name) in names for i in need):
                     break
                 if time.monotonic() > deadline:
                     raise TransientError("Quá 180s chưa tải xong ảnh reference lên Flow")
@@ -507,10 +544,19 @@ class FlowBrowserDriver:
         page.wait_for_timeout(300)
         return bool(need)
 
-    def _compose_prompt(self, page, s: dict, prompt: str, ref_ids: list[str], mention_all: bool = False) -> int:
+    @staticmethod
+    def _ref_pattern(ids: list[str]):
+        return re.compile(r"@(" + "|".join(re.escape(i) for i in ids) + r")(?:\.(?:png|jpe?g|webp))?(?![A-Za-z0-9_-])")
+
+    @classmethod
+    def _needed_refs(cls, prompt: str, ref_ids: list[str]) -> set[str]:
+        ids = sorted({i for i in ref_ids if i}, key=len, reverse=True)
+        return set(cls._ref_pattern(ids).findall(prompt)) if ids else set()
+
+    def _compose_prompt(self, page, s: dict, prompt: str, ref_ids: list[str], mention_all: bool = False) -> set[str]:
         """
         Gõ prompt vào ô của Flow; mỗi "@ID" của ảnh reference thành chip mention: gõ "@", gõ ID, bấm đúng mục có tên
-        file "ID.png/.jpg" (không bấm Enter: "CHAR-CALEB-1" sẽ khớp nhầm "CHAR-CALEB-10"). Trả về số chip đã chèn.
+        file "ID.png/.jpg" (không bấm Enter: "CHAR-CALEB-1" sẽ khớp nhầm "CHAR-CALEB-10"). Trả về tập ID đã gắn chip.
         """
         box = page.locator(s["prompt_box"]).first
         try:
@@ -524,10 +570,10 @@ class FlowBrowserDriver:
             prompt = self._mention_unmentioned_refs(prompt, ids)
         if not ids:
             page.keyboard.insert_text(prompt)
-            return 0
-        pattern = re.compile(r"@(" + "|".join(re.escape(i) for i in ids) + r")(?:\.(?:png|jpe?g|webp))?(?![A-Za-z0-9_-])")
+            return set()
+        pattern = self._ref_pattern(ids)
         option_sel = s.get("ingredient_option") or "button[role=option]"
-        pos, chips = 0, 0
+        pos, attached = 0, set()
         for m in pattern.finditer(prompt):
             if m.start() > pos:
                 page.keyboard.insert_text(prompt[pos:m.start()])
@@ -540,7 +586,7 @@ class FlowBrowserDriver:
             try:
                 opt.first.wait_for(state="visible", timeout=8_000)
                 opt.first.click()
-                chips += 1
+                attached.add(ref)
                 page.wait_for_timeout(150)
                 self._caret_to_end(page, box)   # bố cục tạo trực tiếp: bấm chọn ảnh xong, con trỏ không về ô prompt
             except PlaywrightError:
@@ -554,8 +600,16 @@ class FlowBrowserDriver:
             pos = m.end()
         if pos < len(prompt):
             page.keyboard.insert_text(prompt[pos:])
-        log.info("Đã gõ prompt (%d ký tự), chèn %d chip @tag", len(prompt), chips)
-        return chips
+        log.info("Đã gõ prompt (%d ký tự), gắn chip @tag cho %d ảnh", len(prompt), len(attached))
+        return attached
+
+    @classmethod
+    def _shown_prompt(cls, job: dict) -> str:
+        """Prompt đúng như được gõ vào Flow: prompt ảnh được thêm @ cho ảnh gốc nhắc bằng ID trần."""
+        if job["kind"] != "IMAGE":
+            return job["prompt"]
+        ids = sorted({i for i in cls._ref_ids(job) if i}, key=len, reverse=True)
+        return cls._mention_unmentioned_refs(job["prompt"], ids)
 
     @staticmethod
     def _mention_unmentioned_refs(prompt: str, ids: list[str]) -> str:
@@ -585,28 +639,31 @@ class FlowBrowserDriver:
             page.keyboard.press("Control+End")
 
     @staticmethod
-    def _visible_text(page, texts) -> str | None:
-        for text in texts or []:
-            if _is_todo(text):
-                continue
-            try:
-                if page.get_by_text(text, exact=False).first.is_visible():
-                    return text
-            except PlaywrightError:
-                pass
-        return None
+    def _error_counts(page, s: dict) -> dict:
+        """Số chỗ đang HIỆN từng câu báo hết lượt / vi phạm trên trang (đếm trước khi bấm Tạo để bỏ qua chữ cũ)."""
+        counts = {}
+        for key in ("suspicious_texts", "quota_texts", "policy_texts"):
+            for text in s.get(key) or []:
+                if _is_todo(text):
+                    continue
+                try:
+                    counts[(key, text)] = page.get_by_text(text, exact=False).filter(visible=True).count()
+                except PlaywrightError:
+                    pass
+        return counts
 
     @classmethod
-    def _raise_if_error(cls, page, s: dict):
-        hit = cls._visible_text(page, s.get("suspicious_texts"))
-        if hit:
-            raise BotSuspected(f"Flow nghi ngờ hoạt động tự động: {hit}")
-        hit = cls._visible_text(page, s.get("quota_texts"))
-        if hit:
-            raise QuotaExceeded(f"Flow báo: {hit}")
-        hit = cls._visible_text(page, s.get("policy_texts"))
-        if hit:
-            raise Rejected(f"Flow từ chối: {hit}")
+    def _raise_if_error(cls, page, s: dict, baseline: dict | None = None):
+        """Chỉ báo lỗi khi câu báo MỚI xuất hiện so với baseline (chữ cũ trong lịch sử chat không tính)."""
+        baseline = baseline or {}
+        now = cls._error_counts(page, s)
+        for (key, text), n in now.items():
+            if n > baseline.get((key, text), 0):
+                if key == "suspicious_texts":
+                    raise BotSuspected(f"Flow nghi ngờ hoạt động tự động: {text}")
+                if key == "quota_texts":
+                    raise QuotaExceeded(f"Flow báo: {text}")
+                raise Rejected(f"Flow từ chối: {text}")
 
     # Mỗi ô kết quả có một "khoá": ô ảnh có data-media-id; ô VIDEO của Flow KHÔNG có data-media-id (chỉ có
     # <flow-video-tile> + ảnh thu nhỏ "Generated video thumbnail") -> khoá = "v:" + băm địa chỉ ảnh thu nhỏ.
@@ -640,12 +697,12 @@ class FlowBrowserDriver:
     def _card(page, s: dict, key: str):
         """Ô kết quả theo khoá (gắn lại khoá trước khi tìm: lưới của Flow vẽ lại liên tục)."""
         FlowBrowserDriver._media_ids(page, s)
-        return page.locator(f"{s['result_card']}[data-afm-key='{key}']").first
+        return page.locator(f"{s['result_card']}[data-afm-key={json.dumps(key)}]").first
 
     @staticmethod
     def _media_ready(page, key: str) -> bool:
         """Ảnh / ảnh thu nhỏ của video đã hiện đủ."""
-        return page.evaluate("""(key) => { const c = document.querySelector('[data-afm-key="' + key + '"]');
+        return page.evaluate("""(key) => { const c = document.querySelector('[data-afm-key="' + CSS.escape(key) + '"]');
             if (!c) return false;
             const img = c.querySelector('img');
             return !!img && img.complete && img.naturalWidth > 0; }""", key)
@@ -657,7 +714,8 @@ class FlowBrowserDriver:
         page.wait_for_timeout(300)
         page.locator(s["generate_button"]).first.click()
 
-    def _wait_result(self, page, s: dict, before: set, should_stop, timeout_s: int, kind: str | None = None) -> str:
+    def _wait_result(self, page, s: dict, before: set, errors: dict, should_stop, timeout_s: int,
+                     kind: str | None = None) -> str:
         """
         Chờ một ô kết quả MỚI (data-media-id chưa có trước khi bấm tạo) hiện đủ ảnh/video. Nếu Tác nhân trả lời xong mà
         chưa tạo (thường là hỏi xác nhận kế hoạch) thì tự gửi agent_auto_reply MỘT lần (không gửi nếu đã có ô mới).
@@ -678,7 +736,7 @@ class FlowBrowserDriver:
         while time.monotonic() < deadline:
             if should_stop():
                 raise Cancelled("Người dùng hủy job")
-            self._raise_if_error(page, s)
+            self._raise_if_error(page, s, errors)
             # Video xong: Flow tự chuyển sang /project/<id>/edit/<media id> (không còn lưới ô) -> media id lấy từ địa chỉ
             edit_id = edit_media_id(page.url)
             if edit_id and edit_id not in before:
@@ -727,7 +785,7 @@ class FlowBrowserDriver:
     def _tile_busy(page, s: dict, media_id: str) -> bool:
         """Ô đang tạo: có chữ phần trăm / thanh tiến độ."""
         try:
-            return page.evaluate("""([card, id]) => { const c = document.querySelector('[data-afm-key="' + id + '"]');
+            return page.evaluate("""([card, id]) => { const c = document.querySelector('[data-afm-key="' + CSS.escape(id) + '"]');
                 if (!c) return true;
                 return /[0-9]+ *%/.test(c.innerText || '') || !!c.querySelector('[role=progressbar], mat-progress-spinner, mat-spinner'); }""",
                                  [s["result_card"], media_id])
@@ -776,32 +834,61 @@ class FlowBrowserDriver:
             item = page.locator(s["download_menu_item"]).first
             item.hover()
             page.wait_for_timeout(800)
-        option = page.locator(option_tpl.replace("{quality}", q)).first if not _is_todo(option_tpl) and q else None
-        if option is not None and option.count():
-            option.click()
-            return
-        # menu con không có đúng chất lượng: lấy mục đầu tiên bấm được (thường là "kích thước gốc")
-        sub = page.locator("[role=menuitem]:not([disabled])").filter(has=page.locator(".label"))
-        if not sub.count():
-            sub = page.locator("[role=menuitem]:not([disabled])")
-        labels = [t.strip().replace("\n", " ") for t in sub.all_inner_texts()]
-        log.info("Menu tải về không có '%s', các mục: %s", q, labels)
-        if sub.count():
-            sub.first.click()
-        elif item is not None:
-            item.click()  # không có menu chất lượng: bấm thẳng "Tải xuống"
-        # ở màn chỉnh sửa, không có menu: bấm nút tải là tải luôn
+        if _is_todo(option_tpl) or not q:
+            if item is not None:
+                item.click()  # không cấu hình menu chất lượng: bấm thẳng "Tải xuống"
+            return   # ở màn chỉnh sửa: bấm nút tải là tải luôn
+        levels = VIDEO_QUALITIES[VIDEO_QUALITIES.index(q):] if q in VIDEO_QUALITIES else [q]   # không có mức chọn thì thử mức thấp hơn
+        for level in levels:
+            option = page.locator(option_tpl.replace("{quality}", level)).first
+            if option.count():
+                if level != q:
+                    log.warning("Menu tải về không có '%s': tải mức '%s'", q, level)
+                option.click()
+                return
+        if item is None:
+            return   # ở màn chỉnh sửa không có menu chất lượng
+        first = page.locator("[role=menu]").last.locator("[role=menuitem]:not([disabled])").filter(has=page.locator(".label")).first
+        if not first.count():
+            raise TransientError(f"Menu tải về của Flow không có mục nào (muốn '{q}')")
+        log.warning("Menu tải về không có '%s' hay mức thấp hơn: bấm mục đầu tiên của menu con", q)
+        first.click()
 
-    def _download(self, page, s: dict, media_id: str, staging: Path, stem: str, kind: str, quality: str | None) -> Path:
-        with page.expect_download(timeout=180_000) as dl:
+    @staticmethod
+    def _save_download(d, target: Path):
+        """Ghi vào .part rồi đổi tên: không để lại file dở dang; file rỗng coi là lỗi."""
+        part = target.with_name(target.name + ".part")
+        try:
+            d.save_as(part)
+            if not part.is_file() or part.stat().st_size == 0:
+                raise TransientError("File tải về từ Flow bị rỗng")
+            os.replace(part, target)
+        finally:
+            part.unlink(missing_ok=True)
+
+    def _download(self, page, s: dict, media_id: str, staging: Path, stem: str, kind: str, quality: str | None,
+                  should_stop=None) -> Path:
+        got: list = []
+        on_dl = got.append
+        page.on("download", on_dl)
+        try:
             self._click_download(page, s, media_id, kind, quality)
-        d = dl.value
+            deadline = time.monotonic() + 180
+            while not got:
+                if should_stop and should_stop():
+                    raise Cancelled("Người dùng hủy job")
+                if time.monotonic() > deadline:
+                    raise TransientError("Quá 180s Flow chưa bắt đầu tải file")
+                page.wait_for_timeout(500)
+        finally:
+            page.remove_listener("download", on_dl)
+        d = got[0]
         suffix = Path(d.suggested_filename).suffix or (".mp4" if kind == "VIDEO" else ".png")
         is_video_file = suffix.lower() in (".mp4", ".mov", ".webm")
         if (kind == "VIDEO") != is_video_file:
             raise TransientError(f"Flow trả về file {suffix} cho cảnh {'video' if kind == 'VIDEO' else 'ảnh'}: tạo lại")
         target = staging / f"{stem}{suffix.lower()}"
-        d.save_as(target)
+        self._save_download(d, target)
         return target
 
     # ---------- nhớ lần bấm Tạo dở dang (đóng cửa sổ / mất kết nối khi Flow đang tạo) ----------
@@ -858,6 +945,12 @@ class FlowBrowserDriver:
         return [Path(p).stem for p in job.get("referenceImages") or []]
 
     @staticmethod
+    def _raise_if_login(page, job: dict):
+        """Phiên hết hạn phát hiện muộn: Flow chuyển sang trang đăng nhập Google sau khi mở dự án."""
+        if "accounts.google.com" in page.url:
+            raise AuthRequired(f"{job['account']['email']}: chưa đăng nhập hoặc phiên đã hết hạn")
+
+    @staticmethod
     def _wait_prompt_box(page, s: dict):
         try:
             page.locator(s["prompt_box"]).first.wait_for(state="visible", timeout=30_000)
@@ -877,11 +970,15 @@ class FlowBrowserDriver:
                 try:
                     with tm.step("vao_du_an"):
                         page = self._open_flow(ctx, job)
-                        self._ensure_project(page, job, strict=True)
-                        if "/project/" not in page.url:
-                            raise TransientError("Chưa vào được dự án trên Flow")
-                        self._wait_prompt_box(page, s)
-                        self._dismiss_popups(page)   # hộp thoại phủ (ví dụ Changelog) chặn mọi cú bấm phía sau
+                        try:
+                            self._ensure_project(page, job, strict=True)
+                            if "/project/" not in page.url:
+                                raise TransientError("Chưa vào được dự án trên Flow")
+                            self._wait_prompt_box(page, s)
+                            self._dismiss_popups(page)   # hộp thoại phủ (ví dụ Changelog) chặn mọi cú bấm phía sau
+                        except TransientError:
+                            self._raise_if_login(page, job)
+                            raise
                     if job.get("editInstruction") and job.get("editSourceUrl"):
                         return self._edit_on_flow(page, s, job, staging, should_stop)
                     with tm.step("cai_dat"):
@@ -891,19 +988,25 @@ class FlowBrowserDriver:
                         media_id = self._pending_result(page, s, job)
                     if not media_id:
                         with tm.step("upload_anh"):
-                            uploaded = self._upload_refs(page, s, job["referenceImages"])
+                            uploaded = self._upload_refs(page, s, job["referenceImages"], should_stop)
                             # ô ảnh vừa tải lên hiện trong lưới chậm vài giây; không upload gì thì không cần chờ
                             page.wait_for_timeout(4_000 if uploaded else 300)
                         before = set(self._media_ids(page, s))
+                        errors = self._error_counts(page, s)
                         with tm.step("go_prompt"):
-                            self._compose_prompt(page, s, job["prompt"], self._ref_ids(job), mention_all=job["kind"] == "IMAGE")
+                            attached = self._compose_prompt(page, s, job["prompt"], self._ref_ids(job), mention_all=job["kind"] == "IMAGE")
+                        need = self._needed_refs(self._shown_prompt(job), self._ref_ids(job))
+                        if need - attached:
+                            raise TransientError(f"Chỉ gắn được {len(attached & need)}/{len(need)} ảnh @tag vào prompt: không bấm Tạo")
+                        if should_stop():
+                            raise Cancelled("Người dùng hủy job")
                         self._save_pending(page, job, before)
                         page.locator(s["generate_button"]).first.click()
                         with tm.step("cho_google"):
-                            media_id = self._wait_result(page, s, before, should_stop, job["timeoutSeconds"], job["kind"])
+                            media_id = self._wait_result(page, s, before, errors, should_stop, job["timeoutSeconds"], job["kind"])
                     with tm.step("tai_ve"):
                         staged = self._download(page, s, media_id, staging, job["externalId"], job["kind"],
-                                                job.get("videoQuality") or DEFAULT_VIDEO_QUALITY)
+                                                job.get("videoQuality") or DEFAULT_VIDEO_QUALITY, should_stop)
                     self._clear_pending(job)
                     with tm.step("lay_link_video"):
                         media_url = self._media_url(page, s, media_id) if job["kind"] == "VIDEO" else None
@@ -970,7 +1073,7 @@ class FlowBrowserDriver:
         try:
             grid = page.url
             self._card(page, s, media_id)   # gắn lại khoá lên các ô
-            opened = page.evaluate("""(key) => { const c = document.querySelector('[data-afm-key="' + key + '"]');
+            opened = page.evaluate("""(key) => { const c = document.querySelector('[data-afm-key="' + CSS.escape(key) + '"]');
                 if (!c) return false; const t = c.querySelector('img') || c; t.click(); return true; }""", media_id)
             if not opened:
                 return None
@@ -990,6 +1093,7 @@ class FlowBrowserDriver:
         grid = project_url(page.url)
         page.wait_for_timeout(3_000)
         before = set(self._media_ids(page, s))
+        errors = self._error_counts(page, s)
         page.goto(job["editSourceUrl"], wait_until="domcontentloaded")
         box = page.locator(s.get("edit_prompt_box") or "[role=textbox][contenteditable=true]").first
         try:
@@ -1007,8 +1111,9 @@ class FlowBrowserDriver:
         page.wait_for_timeout(15_000)   # để Flow nhận yêu cầu rồi mới rời màn chỉnh sửa
         page.goto(grid, wait_until="domcontentloaded")
         page.wait_for_timeout(5_000)
-        media_id = self._wait_result(page, s, before, should_stop, job["timeoutSeconds"], "VIDEO")
-        staged = self._download(page, s, media_id, staging, job["externalId"], "VIDEO", job.get("videoQuality") or DEFAULT_VIDEO_QUALITY)
+        media_id = self._wait_result(page, s, before, errors, should_stop, job["timeoutSeconds"], "VIDEO")
+        staged = self._download(page, s, media_id, staging, job["externalId"], "VIDEO", job.get("videoQuality") or DEFAULT_VIDEO_QUALITY,
+                                should_stop)
         self._clear_pending(job)
         return GenerationResult(staged_file=staged, remote_ref=grid, media_url=self._media_url(page, s, media_id))
 
@@ -1018,9 +1123,17 @@ class FlowBrowserDriver:
         staging = Path(job["stagingDir"])
         staging.mkdir(parents=True, exist_ok=True)
         captured: list[Path] = []
+        failures: list[str] = []
         page_ref: list = []
 
         def on_download(d):
+            try:
+                handle(d)
+            except Exception as e:  # lỗi trong handler không được làm vòng chờ treo mãi
+                log.warning("Lưu file tải về lỗi: %s", e)
+                failures.append(str(e)[:200] or type(e).__name__)
+
+        def handle(d):
             suffix = Path(d.suggested_filename).suffix or (".mp4" if job["kind"] == "VIDEO" else ".png")
             if (job["kind"] == "VIDEO") != (suffix.lower() in (".mp4", ".mov", ".webm")):
                 log.warning("Bỏ qua file %s: cảnh %s cần %s", d.suggested_filename, job["externalId"],
@@ -1029,7 +1142,7 @@ class FlowBrowserDriver:
                         + ": hãy tải đúng kết quả của cảnh này") if page_ref else None
                 return
             target = staging / f"{job['externalId']}{suffix.lower()}"
-            d.save_as(target)
+            self._save_download(d, target)
             captured.append(target)
             log.info("Bắt được file người dùng tải: %s", target)
 
@@ -1048,6 +1161,7 @@ class FlowBrowserDriver:
             page = self._open_flow(ctx, job)
             page_ref.append(page)
             self._ensure_project(page, job)
+            self._raise_if_login(page, job)
             resume = None
             if "/project/" in page.url:
                 try:
@@ -1059,13 +1173,13 @@ class FlowBrowserDriver:
                 filled = True
             else:
                 _status(page, "App đang tự điền, đừng đóng cửa sổ…")
-                filled = self._prefill_best_effort(page, s, job)
+                filled = self._prefill_best_effort(page, s, job, should_stop)
                 if not filled and refs_folder:
                     open_in_explorer(refs_folder)  # tự gắn không được: mở thư mục ảnh để người dùng kéo tay
             # Ảnh: điền đủ prompt + @tag thì app tự bấm Tạo và tự tải về (người dùng vẫn duyệt ở màn Duyệt).
             # Video, hoặc khi điền chưa đủ: người dùng tự kiểm tra, bấm Tạo và Tải xuống.
             auto = bool(resume) or (filled and job["kind"] == "IMAGE")
-            state = {"last_check": time.monotonic()}
+            state = {"last_check": time.monotonic(), "errors": self._error_counts(page, s)}
 
             def check():
                 if should_stop():
@@ -1078,9 +1192,11 @@ class FlowBrowserDriver:
                     raise QuotaExceeded(f"Bạn báo tài khoản {job['account']['email']} hết lượt ở cảnh {job['externalId']}")
                 if not ctx.pages:
                     raise PausedByUser(f"Bạn đã đóng cửa sổ Flow ở cảnh {job['externalId']}")
+                if failures:
+                    raise TransientError(f"Không lưu được file tải về: {failures[0]}")
                 if time.monotonic() - state["last_check"] > 5:
                     state["last_check"] = time.monotonic()
-                    self._raise_if_error(ctx.pages[0], s)   # Flow báo hết lượt → tự đổi tài khoản
+                    self._raise_if_error(ctx.pages[0], s, state["errors"])   # Flow báo hết lượt → tự đổi tài khoản
 
             try:
                 if auto:
@@ -1091,15 +1207,17 @@ class FlowBrowserDriver:
                             _status(page, "✓ Ảnh của lần trước đã tạo xong trên Flow, đang tải về (không tạo lại)…")
                         else:
                             page.wait_for_timeout(4_000)
+                            check()
                             before = set(self._media_ids(page, s))
                             log.info("FOREGROUND %s: đã điền đủ, tự bấm Tạo", job["externalId"])
                             _status(page, "Đang tạo ảnh… thường mất 1–2 phút. ĐỪNG đóng cửa sổ, app tự tải về khi xong")
                             self._save_pending(page, job, before)
                             page.locator(s["generate_button"]).first.click()
-                            media_id = self._wait_result(page, s, before, lambda: check() or False, job["timeoutSeconds"], job["kind"])
+                            media_id = self._wait_result(page, s, before, state["errors"], lambda: check() or False, job["timeoutSeconds"],
+                                                       job["kind"])
                         _status(page, "✓ Có ảnh, đang tải về…")
                         self._click_download(page, s, media_id, job["kind"], job.get("videoQuality") or DEFAULT_VIDEO_QUALITY)
-                    except TransientError as e:
+                    except (TransientError, PlaywrightTimeout) as e:
                         # chưa thấy kết quả / không bấm tải được: để người dùng tự tải trong cửa sổ này
                         log.warning("FOREGROUND %s: không tự lấy được kết quả: %s", job["externalId"], e)
                         _status(page, "Chưa tự lấy được ảnh: khi có kết quả, bấm ⋮ → Tải xuống")
@@ -1113,8 +1231,10 @@ class FlowBrowserDriver:
                         deadline = None
                         _status(page, "Chưa thấy file tải về: bấm ⋮ → Tải xuống trên ảnh vừa tạo")
             except PlaywrightError as e:
-                # đóng cửa sổ = tạm dừng phim (không nhảy sang mở cảnh khác), cảnh này quay về "Chờ chạy"
-                raise PausedByUser(f"Bạn đã đóng cửa sổ Flow ở cảnh {job['externalId']}") from e
+                # chỉ khi cửa sổ thật sự đóng mới tạm dừng phim (cảnh này quay về "Chờ chạy"); lỗi khác là lỗi tạm thời
+                if page.is_closed() or not ctx.pages:
+                    raise PausedByUser(f"Bạn đã đóng cửa sổ Flow ở cảnh {job['externalId']}") from e
+                raise TransientError(f"Lỗi trình duyệt khi chờ tải về: {str(e)[:300]}") from e
             self._clear_pending(job)
             return GenerationResult(staged_file=captured[-1], remote_ref=project_url(page.url) if not page.is_closed() else None)
 
@@ -1202,7 +1322,7 @@ class FlowBrowserDriver:
         except PlaywrightError:
             return False
 
-    def _prefill_best_effort(self, page, s: dict, job: dict) -> bool:
+    def _prefill_best_effort(self, page, s: dict, job: dict, should_stop=None) -> bool:
         """Tự upload ảnh còn thiếu + gõ prompt có chip @tag (không bấm Tạo). True nếu gắn được đủ ảnh."""
         if "/project" not in page.url:
             # chưa vào dự án: ô tìm kiếm ở màn hình chính có thể khớp selector prompt_box, đừng điền nhầm
@@ -1214,16 +1334,16 @@ class FlowBrowserDriver:
             return False
         page.set_default_timeout(10_000)   # bước "cố gắng": không treo 45s ở một nút không có
         try:
-            return self._prefill_steps(page, s, job)
+            return self._prefill_steps(page, s, job, should_stop)
         finally:
             if not page.is_closed():
                 page.set_default_timeout(45_000)
 
-    def _prefill_steps(self, page, s: dict, job: dict) -> bool:
+    def _prefill_steps(self, page, s: dict, job: dict, should_stop=None) -> bool:
         uploaded = True
         for name, step in [("đặt cài đặt (x1, độ dài, độ phân giải)", lambda: self._apply_settings(page, s, job["kind"], job)),
                            ("chọn chế độ", lambda: self._select_mode(page, s, job["kind"])),
-                           ("upload ảnh reference", lambda: self._upload_refs(page, s, job["referenceImages"]))]:
+                           ("upload ảnh reference", lambda: self._upload_refs(page, s, job["referenceImages"], should_stop))]:
             _status(page, "Đang " + name + "…")
             try:
                 step()
@@ -1235,14 +1355,13 @@ class FlowBrowserDriver:
         ids = self._ref_ids(job)
         _status(page, "Đang gõ prompt và gắn @tag…")
         try:
-            chips = self._compose_prompt(page, s, job["prompt"], ids if uploaded else [], mention_all=job["kind"] == "IMAGE")
+            attached = self._compose_prompt(page, s, job["prompt"], ids if uploaded else [], mention_all=job["kind"] == "IMAGE")
         except PlaywrightError as e:
             log.warning("FOREGROUND: không tự điền prompt được: %s", str(e)[:200])
             _status(page, "Không tự gõ được prompt: dùng nút Copy prompt")
             return False
-        shown = self._mention_unmentioned_refs(job["prompt"], ids) if job["kind"] == "IMAGE" else job["prompt"]
-        need = len({i for i in ids if ("@" + i) in shown})
-        ok = uploaded and chips >= need
-        _status(page, ("✓ Đã điền xong prompt" + (f" + {chips} ảnh @tag" if chips else "") + ". Kiểm tra rồi bấm Tạo.")
-                if ok else f"Chỉ gắn được {chips}/{need} ảnh: gắn tay ảnh còn thiếu (thư mục ảnh đã mở)")
+        need = self._needed_refs(self._shown_prompt(job), ids)
+        ok = uploaded and need <= attached
+        _status(page, ("✓ Đã điền xong prompt" + (f" + {len(attached)} ảnh @tag" if attached else "") + ". Kiểm tra rồi bấm Tạo.")
+                if ok else f"Chỉ gắn được {len(attached & need)}/{len(need)} ảnh: gắn tay ảnh còn thiếu (thư mục ảnh đã mở)")
         return ok

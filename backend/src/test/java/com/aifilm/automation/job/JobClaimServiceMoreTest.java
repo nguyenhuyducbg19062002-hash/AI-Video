@@ -73,7 +73,7 @@ class JobClaimServiceMoreTest {
         when(jobs.findByAccountIdAndStatus(7L, JobStatus.GENERATING)).thenReturn(List.of(running));
         when(projects.findById(1L)).thenReturn(Optional.of(project));
         when(jobs.countByProjectIdAndStatus(1L, JobStatus.GENERATING)).thenReturn(1L);
-        when(jobs.findNextRunnable(anyLong(), anyInt(), anyInt(), anyInt())).thenReturn(Optional.of(candidate));
+        when(jobs.findNextRunnable(anyLong(), anyInt(), anyInt(), anyInt(), any())).thenReturn(Optional.of(candidate));
         when(payloads.forGenerate(any(), any(), any())).thenReturn(new JobPayload(101L, "VIDEO", "FLOW_BROWSER", "BACKGROUND",
                 "2", "p", List.of(), Map.of(), "s", null, "16:9", 600, false, null, "720p", null, null));
     }
@@ -126,7 +126,7 @@ class JobClaimServiceMoreTest {
 
     @Test
     void refuses_whenNothingIsRunnable() {
-        when(jobs.findNextRunnable(anyLong(), anyInt(), anyInt(), anyInt())).thenReturn(Optional.empty());
+        when(jobs.findNextRunnable(anyLong(), anyInt(), anyInt(), anyInt(), any())).thenReturn(Optional.empty());
         assertTrue(service.claimMoreInTx("py-0", 7L).isEmpty());
     }
 

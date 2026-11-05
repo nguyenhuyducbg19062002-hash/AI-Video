@@ -31,7 +31,8 @@ class JobResultServiceSuspiciousTest {
         AppSettingsService settings = mock(AppSettingsService.class);
         when(settings.getIntSetting(anyString(), anyInt())).thenAnswer(i -> i.getArgument(1));
         JobResultService service = new JobResultService(jobs, accounts, mock(ProjectRepository.class),
-                new JobTransitions(mock(JobEventRepository.class)), settings, mock(FlowLinkRepository.class), mock(ReviewService.class));
+                new JobTransitions(mock(JobEventRepository.class)), settings, mock(FlowLinkRepository.class), mock(ReviewService.class),
+                new org.springframework.transaction.support.TransactionTemplate(mock(org.springframework.transaction.PlatformTransactionManager.class)));
 
         AccountEntity acc = new AccountEntity();
         acc.setId(1L);

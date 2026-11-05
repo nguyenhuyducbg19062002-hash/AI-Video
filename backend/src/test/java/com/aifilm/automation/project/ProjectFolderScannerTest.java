@@ -137,6 +137,26 @@ class ProjectFolderScannerTest {
     }
 
     @Test
+    void foldersMerelyContainingAnh_areNotTheImageFolder() throws IOException {
+        file("Thành phẩm/a.png");
+        file("Cảnh quay/b.png");
+        file("Doanh thu/c.xlsx");
+        var s = ProjectFolderScanner.scan(root);
+        assertFalse(s.imageExists());
+        assertEquals(root.resolve("Ảnh tham chiếu").toString(), s.imageDir());
+    }
+
+    @Test
+    void keywordAtWordStart_matches() throws IOException {
+        file("Hình ảnh gốc/a.png");
+        assertEquals(root.resolve("Hình ảnh gốc").toString(), ProjectFolderScanner.scan(root).imageDir());
+        assertTrue(ProjectFolderScanner.hasWord("anh-cua-toi", "anh"));
+        assertTrue(ProjectFolderScanner.hasWord("tham chiếu 2", "thamchieu"));
+        assertFalse(ProjectFolderScanner.hasWord("Thanh", "anh"));
+        assertFalse(ProjectFolderScanner.hasWord("Doanh thu", "anh"));
+    }
+
+    @Test
     void missingRootIsRejected() {
         assertThrows(IllegalArgumentException.class, () -> ProjectFolderScanner.scan(root.resolve("khong-co")));
     }
