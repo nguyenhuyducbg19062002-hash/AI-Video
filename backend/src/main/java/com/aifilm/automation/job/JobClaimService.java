@@ -101,6 +101,21 @@ public class JobClaimService {
         return Optional.empty();   // ảnh đang tạo / chờ duyệt / lỗi: cảnh chờ
     }
 
+    /**
+     * Cảnh kế tiếp của phim theo đúng thứ tự worker sẽ chạy, nhưng KHÔNG nhận job và không thuê tài khoản.
+     * Dùng cho chế độ "Tự làm trên Flow": app chỉ bày cảnh ra, người dùng tự tạo trên Flow. Gọi trong transaction.
+     */
+    public Optional<JobEntity> peekNext(ProjectEntity p, Set<Long> skip) {
+        Set<Long> s = new HashSet<>(skip);
+        s.add(-1L);   // NOT IN không được rỗng
+        if (!p.isSkipMissingRefsOn() && !p.isWaitAllImagesOn() && !p.isSelectedOnlyOn()) {
+            return jobs.findNextRunnable(p.getId(), 0, 1, 0, s).or(() -> nextBySceneOrder(p, s));
+        }
+        boolean imagesOnly = !p.isSkipMissingRefsOn() && p.isWaitAllImagesOn() && jobs.countByProjectIdAndKindAndStatusNotIn(
+                p.getId(), PromptKind.IMAGE, List.of(JobStatus.SUCCESS, JobStatus.CANCELLED)) > 0;
+        return jobs.findNextRunnable(p.getId(), imagesOnly ? 1 : 0, p.isSelectedOnlyOn() ? 1 : 0, p.isSkipMissingRefsOn() ? 1 : 0, s);
+    }
+
     private Optional<JobPayload> claimInTx(String workerId) {
         LocalDateTime now = LocalDateTime.now();
         for (ProjectEntity p : projects.findByStatusOrderByIdAsc(ProjectStatus.RUNNING)) {

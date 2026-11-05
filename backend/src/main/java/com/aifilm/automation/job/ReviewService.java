@@ -190,9 +190,22 @@ public class ReviewService {
      */
     @Transactional
     public JobEntity manualResult(long jobId, org.springframework.web.multipart.MultipartFile file) {
+        return manualResult(jobId, file.getOriginalFilename() == null ? "" : file.getOriginalFilename(), file::transferTo);
+    }
+
+    /** Như trên nhưng lấy file có sẵn trên máy (chế độ "Tự làm trên Flow": file vừa tải về thư mục Downloads). File gốc giữ nguyên. */
+    @Transactional
+    public JobEntity manualResult(long jobId, Path source) {
+        return manualResult(jobId, source.getFileName().toString(), dest -> Files.copy(source, dest, StandardCopyOption.REPLACE_EXISTING));
+    }
+
+    interface FileWriter {
+        void writeTo(Path dest) throws IOException;
+    }
+
+    private JobEntity manualResult(long jobId, String original, FileWriter file) {
         JobEntity job = jobs.findById(jobId).orElseThrow();
         PromptEntity prompt = prompts.findById(job.getPromptId()).orElseThrow();
-        String original = file.getOriginalFilename() == null ? "" : file.getOriginalFilename();
         String ext = extensionOf(original);
         boolean video = prompt.getKind() == PromptKind.VIDEO;
         if (video ? !List.of(".mp4", ".mov", ".webm").contains(ext) : !List.of(".png", ".jpg", ".jpeg", ".webp").contains(ext)) {
@@ -204,7 +217,7 @@ public class ReviewService {
         Path upload = staged.resolveSibling(staged.getFileName() + "." + UUID.randomUUID() + ".upload");
         try {
             Files.createDirectories(staged.getParent());
-            file.transferTo(upload);
+            file.writeTo(upload);
             var problem = MediaCheck.problem(upload).or(() -> MediaCheck.wrongKind(upload, video));
             if (problem.isPresent()) {
                 throw new IllegalArgumentException("File không dùng được: " + problem.get());
