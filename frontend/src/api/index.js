@@ -79,7 +79,8 @@ export const manualApi = {
   next: (projectId, skip = []) =>
     data(http.get(`/projects/${projectId}/manual/next`, { params: skip.length ? { skip: skip.join(',') } : {} })),
   /** Chép ảnh reference của cảnh ra một thư mục riêng và mở Explorer để kéo thả vào Flow */
-  openRefs: (jobId) => data(http.post(`/jobs/${jobId}/manual/open-refs`)),
+  openRefs: (jobId, only) =>
+    data(http.post(`/jobs/${jobId}/manual/open-refs`, null, { params: only ? { only: only.join(',') } : {} })),
   /** File ảnh/video đã tải xong trong thư mục Downloads, mới hơn after (epoch ms) */
   downloads: (after, kind) => data(http.get('/manual/downloads', { params: { after, kind } })),
   importDownload: (jobId, path) => data(http.post(`/jobs/${jobId}/manual/import`, { path }, { timeout: 600000 })),

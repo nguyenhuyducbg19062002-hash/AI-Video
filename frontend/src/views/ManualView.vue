@@ -52,21 +52,28 @@
         <!-- Các bước người dùng làm trên Flow -->
         <ol class="grid md:grid-cols-3 gap-3 text-sm">
           <li class="rounded-xl border border-slate-200 p-3 space-y-2">
-            <div class="font-semibold text-slate-700">1. Gắn ảnh reference</div>
-            <div v-if="job.references.length" class="text-slate-500 text-xs">
-              {{ job.references.length }} ảnh, đúng thứ tự. Bấm mở rồi chọn hết (Ctrl+A) và kéo thả vào Flow.
-            </div>
+            <div class="font-semibold text-slate-700">1. Tải ảnh lên dự án Flow</div>
+            <template v-if="job.references.length">
+              <div v-if="toUpload.length" class="text-slate-500 text-xs">
+                Bấm mở, chọn hết (Ctrl+A) rồi kéo vào mục <b>Uploads</b> của Flow (không kéo vào ô prompt). Thứ tự không quan trọng.
+              </div>
+              <div v-else class="text-emerald-700 text-xs">Mọi ảnh của cảnh này đã có trên dự án Flow (đã gắn ở cảnh trước).</div>
+              <div class="flex flex-wrap gap-1">
+                <span v-for="r in job.references" :key="r.id" class="font-mono text-[11px] px-1 rounded"
+                  :class="onFlow.has(r.id) ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'"
+                  :title="onFlow.has(r.id) ? 'Đã có trên Flow' : 'Cần tải lên'">
+                  {{ onFlow.has(r.id) ? '✓' : '↑' }} {{ r.id }}
+                </span>
+              </div>
+              <button class="btn w-full" @click="openRefs" title="Phím O">
+                <FolderOpen class="w-4 h-4" />
+                {{ toUpload.length ? `Mở ${toUpload.length} ảnh cần tải lên` : 'Mở lại tất cả ảnh' }}
+              </button>
+            </template>
             <div v-else class="text-slate-500 text-xs">Cảnh này không cần ảnh.</div>
-            <button v-if="job.references.length" class="btn w-full" @click="openRefs" title="Phím O">
-              <FolderOpen class="w-4 h-4" /> Mở thư mục ảnh
-            </button>
           </li>
-          <li class="rounded-xl border border-slate-200 p-3 space-y-2">
-            <div class="font-semibold text-slate-700">2. Dán prompt, bấm Tạo</div>
-            <div class="text-slate-500 text-xs">
-              Trên Flow, gõ <b>@</b> rồi chọn đúng ảnh cho từng tag:
-              <span v-for="t in tags" :key="t" class="inline-block font-mono text-[11px] px-1 rounded bg-slate-100 mr-1">@{{ t }}</span>
-            </div>
+          <li class="rounded-xl border p-3 space-y-2" :class="tagsLeft ? 'border-amber-300' : 'border-emerald-300 bg-emerald-50/50'">
+            <div class="font-semibold text-slate-700">2. Dán prompt, gắn tag, bấm Tạo</div>
             <div class="flex gap-2">
               <button class="btn-primary flex-1" @click="copyPrompt" title="Phím C">
                 <Copy class="w-4 h-4" /> {{ copied ? 'Đã copy' : 'Copy prompt' }}
@@ -75,6 +82,17 @@
                 <ExternalLink class="w-4 h-4" />
               </button>
             </div>
+            <template v-if="tags.length">
+              <div class="text-slate-500 text-xs">
+                Chỉ gắn ở đoạn đầu prompt: bôi đen chữ <b>@ID</b>, gõ <b>@ID</b> rồi chọn đúng ảnh. Gắn xong tick:
+              </div>
+              <label v-for="t in tags" :key="t" class="flex items-center gap-2 text-xs cursor-pointer select-none">
+                <input type="checkbox" :checked="ticked.has(t)" @change="toggleTag(t)" />
+                <span class="font-mono" :class="ticked.has(t) ? 'text-emerald-700 line-through' : 'text-slate-700'">@{{ t }}</span>
+              </label>
+              <div v-if="tagsLeft" class="text-amber-700 text-xs">Còn {{ tagsLeft }} tag chưa gắn</div>
+              <div v-else class="text-emerald-700 text-xs">Đã gắn đủ tag, bấm Tạo trên Flow</div>
+            </template>
           </li>
           <li class="rounded-xl border p-3 space-y-2" :class="found.length ? 'border-emerald-300 bg-emerald-50/50' : 'border-slate-200'">
             <div class="font-semibold text-slate-700">3. Tải xuống</div>
@@ -128,14 +146,58 @@ const importing = ref('')
 const copied = ref(false)
 
 const job = computed(() => state.value?.job || null)
-/** Các tag @ID trong prompt, theo thứ tự xuất hiện: người dùng cần gắn chip ảnh cho từng tag trên Flow */
-const tags = computed(() => {
+const ID = '@([A-Za-z][A-Za-z0-9_]*(?:-[A-Za-z0-9_]+)+)'
+function collect(re, text) {
   const out = []
-  for (const m of (job.value?.prompt || '').matchAll(/@([A-Za-z][A-Za-z0-9_]*(?:-[A-Za-z0-9_]+)+)/g)) {
-    if (!out.includes(m[1])) out.push(m[1])
-  }
+  for (const m of text.matchAll(re)) if (!out.includes(m[1])) out.push(m[1])
   return out
+}
+/**
+ * Tag cần gắn chip trên Flow. Prompt Omni khai báo mỗi ảnh MỘT lần ở đoạn đầu ("@PANEL-3 = THE STILLS …"), phần sau chỉ
+ * gọi tên: chỉ cần gắn chip ở các khai báo đó. Prompt không có khai báo thì gắn mọi tag @ID.
+ */
+const tags = computed(() => {
+  const text = job.value?.prompt || ''
+  const declared = collect(new RegExp(ID + '\\s*=', 'g'), text)
+  return declared.length ? declared : collect(new RegExp(ID, 'g'), text)
 })
+
+/** Tag đã gắn trong cảnh đang làm */
+const ticked = ref(new Set())
+const tagsLeft = computed(() => tags.value.filter((t) => !ticked.value.has(t)).length)
+
+/**
+ * Ảnh đã có trên dự án Flow của phim (theo tên ID): ghi nhận khi người dùng tick đã gắn tag (gắn được tức là ảnh đã ở trên Flow).
+ * Chỉ lưu ở máy này (localStorage); sai thì người dùng vẫn bấm "Mở lại tất cả ảnh".
+ */
+const onFlow = ref(new Set())
+const flowKey = () => `afm.flowUploaded.${store.current?.project.id}`
+function loadOnFlow() {
+  try {
+    onFlow.value = new Set(JSON.parse(localStorage.getItem(flowKey()) || '[]'))
+  } catch {
+    onFlow.value = new Set()
+  }
+}
+function markOnFlow(id) {
+  onFlow.value = new Set([...onFlow.value, id])
+  try {
+    localStorage.setItem(flowKey(), JSON.stringify([...onFlow.value]))
+  } catch {
+    /* không lưu được: chỉ là tiện ích */
+  }
+}
+const toUpload = computed(() => (job.value?.references || []).filter((r) => !onFlow.value.has(r.id)).map((r) => r.id))
+
+function toggleTag(t) {
+  const s = new Set(ticked.value)
+  if (s.has(t)) s.delete(t)
+  else {
+    s.add(t)
+    markOnFlow(t)
+  }
+  ticked.value = s
+}
 
 async function load() {
   if (!store.current) return
@@ -147,6 +209,7 @@ async function load() {
       startedAt.value = Date.now()
       found.value = []
       copied.value = false
+      ticked.value = new Set()
     }
   } catch (e) {
     store.toast(errMsg(e), 'error')
@@ -176,7 +239,7 @@ async function copyPrompt() {
 
 async function openRefs() {
   try {
-    await manualApi.openRefs(job.value.id)
+    await manualApi.openRefs(job.value.id, toUpload.value.length ? toUpload.value : null)
   } catch (e) {
     store.toast(errMsg(e), 'error')
   }
@@ -230,6 +293,11 @@ async function finish(name, action) {
 const failed = new Set()
 
 function importFile(f) {
+  // chưa tick đủ tag: có thể video được tạo khi chưa gắn đủ ảnh, hỏi lại trước khi lưu
+  if (tagsLeft.value && !confirm(`Còn ${tagsLeft.value} tag chưa tick là đã gắn ảnh. Vẫn lưu ${f.name} làm kết quả cảnh ${job.value.externalId}?`)) {
+    failed.add(f.path + '|' + f.modified)   // không hỏi lại mỗi 2 giây; muốn lưu thì bấm "Dùng file này"
+    return
+  }
   return finish(f.name, async () => {
     try {
       return await manualApi.importDownload(job.value.id, f.path)
@@ -272,6 +340,7 @@ function onKey(e) {
 watch(() => store.current?.project.id, (id) => {
   skipped.value = []
   state.value = null
+  loadOnFlow()
   if (id) load()
 }, { immediate: true })
 

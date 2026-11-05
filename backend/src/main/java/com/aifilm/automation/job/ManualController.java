@@ -22,8 +22,8 @@ public class ManualController {
     }
 
     @PostMapping("/jobs/{id}/manual/open-refs")
-    public Map<String, String> openRefs(@PathVariable long id) {
-        return Map.of("path", manual.prepareReferences(id, true).toString());
+    public Map<String, String> openRefs(@PathVariable long id, @RequestParam(required = false) List<String> only) {
+        return Map.of("path", manual.prepareReferences(id, only, true).toString());
     }
 
     @GetMapping("/manual/downloads")

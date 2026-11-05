@@ -76,6 +76,12 @@ public class ManualService {
      */
     @Transactional(readOnly = true)
     public Path prepareReferences(long jobId, boolean open) {
+        return prepareReferences(jobId, null, open);
+    }
+
+    /** only: chỉ chép các ảnh này (ảnh chưa có trên dự án Flow); null = mọi ảnh của cảnh. */
+    @Transactional(readOnly = true)
+    public Path prepareReferences(long jobId, Collection<String> only, boolean open) {
         JobView job = query.view(jobId);
         JobEntity entity = jobs.findById(jobId).orElseThrow();
         Path dir = AppPaths.data().resolve("canh-dang-lam").resolve("phim-" + entity.getProjectId());
@@ -88,6 +94,9 @@ public class ManualService {
             }
             int copied = 0;
             for (JobView.RefView r : job.references()) {
+                if (only != null && !only.contains(r.id())) {
+                    continue;
+                }
                 Optional<Path> src = assets.file(entity.getProjectId(), r.id());
                 if (src.isEmpty() || !Files.isRegularFile(src.get())) {
                     continue;
