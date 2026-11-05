@@ -105,6 +105,10 @@ public class ProjectService {
                 }
                 notes.addAll(AutoImportSummary.warnings(a));
             }
+            int adopted = adoptExistingVideos(id);
+            if (adopted > 0) {
+                notes.add("✓ " + adopted + " video đã có sẵn trong Folder Video: đánh dấu xong, không tạo lại");
+            }
         } catch (Exception e) {
             log.warn("Tự nạp phim {} lỗi: {}", p.getCode(), e.toString());
             notes.add("Không nạp tự động được (" + e.getMessage() + "): bấm \"Import prompt\" để thử lại.");
@@ -150,6 +154,10 @@ public class ProjectService {
         ProjectEntity p = projects.findById(id).orElseThrow();
         int checked = 0, missing = 0, broken = 0;
         List<String> details = new ArrayList<>();
+        int adopted = adoptExistingVideos(id);
+        if (adopted > 0) {
+            details.add(adopted + " video đã có sẵn trong Folder Video: đánh dấu xong");
+        }
         for (JobEntity j : jobs.findByProjectIdAndStatus(id, JobStatus.SUCCESS)) {
             checked++;
             Path file = j.getFinalPath() == null ? null
@@ -202,6 +210,63 @@ public class ProjectService {
             log.warn("Phim {}: {} file mất, {} file hỏng", id, missing, broken);
         }
         return new VerifyResult(checked, missing, broken, requeued, details.subList(0, Math.min(details.size(), 20)));
+    }
+
+    static final List<String> VIDEO_EXT = List.of(".mp4", ".mov", ".webm");
+
+    /**
+     * Video đã có sẵn trong Folder Video với đúng tên app đặt khi duyệt (ví dụ EP06-S1-03.mp4): cảnh đó coi như đã xong,
+     * không tạo lại. Trường hợp hay gặp: xoá phim rồi tạo lại (hoặc nạp lại prompt) mà video đã duyệt từ hôm trước vẫn còn
+     * trong folder. Chỉ đụng tới cảnh chưa có kết quả (chờ chạy / lỗi / đã huỷ); file hỏng thì bỏ qua để app tạo lại.
+     * Trả về số cảnh được đánh dấu xong.
+     */
+    @Transactional
+    public int adoptExistingVideos(long id) {
+        ProjectEntity p = projects.findById(id).orElseThrow();
+        if (p.getVideoDir() == null || p.getVideoDir().isBlank() || !Files.isDirectory(Path.of(p.getVideoDir()))) {
+            return 0;
+        }
+        Path dir = Path.of(p.getVideoDir());
+        List<PromptEntity> videos = prompts.findByProjectId(id).stream().filter(pr -> pr.getKind() == PromptKind.VIDEO).toList();
+        Map<Long, PromptEntity> byId = new HashMap<>();
+        videos.forEach(v -> byId.put(v.getId(), v));
+        int adopted = 0;
+        for (JobEntity j : jobs.findByProjectId(id)) {
+            PromptEntity prompt = byId.get(j.getPromptId());
+            if (prompt == null || !EnumSet.of(JobStatus.PENDING, JobStatus.FAILED, JobStatus.CANCELLED).contains(j.getStatus())) {
+                continue;
+            }
+            Optional<Path> found = Optional.empty();
+            for (String ext : VIDEO_EXT) {
+                Path f = dir.resolve(ReviewService.finalFileName(p, prompt, ext, videos));
+                if (Files.isRegularFile(f) && MediaCheck.problem(f).isEmpty()) {
+                    found = Optional.of(f);
+                    break;
+                }
+            }
+            if (found.isEmpty()) {
+                continue;
+            }
+            String why = "đã có video " + found.get().getFileName() + " trong Folder Video";
+            j.setRunPriority(null);
+            j.setAccountId(null);
+            j.setWorkerId(null);
+            j.setErrorCode(null);
+            j.setErrorMessage(null);
+            j.setCancelRequested(false);
+            transitions.move(j, JobStatus.AWAITING_REVIEW, null, why);
+            transitions.move(j, JobStatus.APPROVED, null, why);
+            transitions.move(j, JobStatus.DOWNLOADING, null, why);
+            j.setFinalPath(found.get().toString());
+            j.setCompletedAt(java.time.LocalDateTime.now());
+            transitions.move(j, JobStatus.SUCCESS, null, why);
+            jobs.save(j);   // gọi cả từ chỗ không có transaction (tự nạp lúc tạo phim): lưu tường minh
+            adopted++;
+        }
+        if (adopted > 0) {
+            log.info("Phim {}: {} video đã có sẵn trong Folder Video, đánh dấu xong", p.getCode(), adopted);
+        }
+        return adopted;
     }
 
     private Optional<ProjectAssetEntity> approvedAsset(long projectId, JobEntity j) {

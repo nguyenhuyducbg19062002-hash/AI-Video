@@ -72,7 +72,9 @@ public class ProjectController {
     /** Nạp tất cả file Excel Omni quen thuộc trong thư mục nguồn của phim. */
     @PostMapping("/{id}/import")
     public List<ImportResult> importPrompts(@PathVariable long id) throws IOException {
-        return importer.importProject(id);
+        List<ImportResult> r = importer.importProject(id);
+        service.adoptExistingVideos(id);   // video đã duyệt từ trước vẫn còn trong Folder Video: không tạo lại
+        return r;
     }
 
     /** "Thêm file ảnh" (kind=IMAGE) / "Thêm file video" (kind=VIDEO): tải một file .xlsx hoặc .txt (mỗi dòng 1 prompt) lên. */
@@ -88,7 +90,9 @@ public class ProjectController {
             Path tmp = tmpDir.resolve(name);
             try {
                 file.transferTo(tmp);
-                return importer.importTxt(id, kind, tmp);
+                ImportResult r = importer.importTxt(id, kind, tmp);
+                service.adoptExistingVideos(id);
+                return r;
             } finally {
                 java.nio.file.Files.deleteIfExists(tmp);
                 java.nio.file.Files.deleteIfExists(tmpDir);
@@ -98,14 +102,18 @@ public class ProjectController {
             throw new IllegalArgumentException(name + ": chỉ nhận file Excel .xlsx hoặc .txt (mỗi dòng một prompt)");
         }
         try (InputStream in = file.getInputStream()) {
-            return importer.importFile(id, kind, name, in);
+            ImportResult r = importer.importFile(id, kind, name, in);
+            service.adoptExistingVideos(id);
+            return r;
         }
     }
 
     /** "Nạp cả thư mục phim": mọi file prompt (.xlsx / .txt) + ảnh có sẵn trong một thư mục, ví dụ D:\Dev\Tập 5. Hà - Cupid. */
     @PostMapping("/{id}/import-folder")
     public OmniImportService.FolderResult importMovieFolder(@PathVariable long id, @RequestBody(required = false) Map<String, Object> body) throws IOException {
-        return importer.importFolder(id, pathOf(body));
+        OmniImportService.FolderResult r = importer.importFolder(id, pathOf(body));
+        service.adoptExistingVideos(id);
+        return r;
     }
 
     /** "Nhập thủ công": dán prompt, mỗi dòng một cảnh. */
