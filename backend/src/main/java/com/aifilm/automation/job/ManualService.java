@@ -51,11 +51,25 @@ public class ManualService {
     /** Cảnh kế tiếp cần làm. skip: cảnh người dùng bấm "Để sau" trong phiên này. */
     @Transactional(readOnly = true)
     public NextScene next(long projectId, Collection<Long> skip) {
+        return next(projectId, skip, false);
+    }
+
+    /** imagesOnly: "Chỉ làm ảnh" - làm hết ảnh (nhân vật, bối cảnh, panel) trước rồi mới sang video. */
+    @Transactional(readOnly = true)
+    public NextScene next(long projectId, Collection<Long> skip, boolean imagesOnly) {
         ProjectEntity p = projects.findById(projectId).orElseThrow();
-        long remaining = jobs.countByProjectIdAndStatus(projectId, JobStatus.PENDING);
-        Optional<JobEntity> next = claims.peekNext(p, new HashSet<>(skip));
+        long remaining = imagesOnly
+                ? jobs.countByProjectIdAndKindAndStatus(projectId, PromptKind.IMAGE, JobStatus.PENDING)
+                : jobs.countByProjectIdAndStatus(projectId, JobStatus.PENDING);
+        Optional<JobEntity> next = claims.peekNext(p, new HashSet<>(skip), imagesOnly);
         String note = null;
-        if (next.isEmpty()) {
+        if (next.isEmpty() && imagesOnly) {
+            note = remaining == 0
+                    ? "Đã xong hết ảnh của phim. Tắt \"Chỉ làm ảnh\" để sang làm video"
+                    : !skip.isEmpty()
+                    ? "Hết ảnh chưa làm; còn các ảnh bạn bấm \"Để sau\""
+                    : "Các ảnh còn lại cần ảnh khác chưa có (ví dụ panel cần ảnh nhân vật chưa có prompt tạo): thêm ảnh có sẵn ở trang Phim";
+        } else if (next.isEmpty()) {
             if (remaining == 0) {
                 note = "Phim không còn cảnh nào chờ làm";
             } else if (!skip.isEmpty()) {

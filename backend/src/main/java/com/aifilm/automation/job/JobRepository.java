@@ -90,6 +90,8 @@ public interface JobRepository extends JpaRepository<JobEntity, Long> {
     int maxRunPriority(@Param("projectId") Long projectId);
 
     /** Số ảnh của phim chưa xong (bỏ qua ảnh đã hủy: người dùng chủ động bỏ thì không chặn cả phim). */
+    long countByProjectIdAndKindAndStatus(Long projectId, com.aifilm.automation.prompt.PromptKind kind, JobStatus status);
+
     long countByProjectIdAndKindAndStatusNotIn(Long projectId, com.aifilm.automation.prompt.PromptKind kind,
                                                java.util.Collection<JobStatus> statuses);
 

@@ -12,7 +12,17 @@
       </div>
 
       <div class="card p-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
-        <div><span class="text-slate-500">Còn chờ làm:</span> <b>{{ state?.remaining ?? '…' }}</b> cảnh</div>
+        <!-- Chỉ làm ảnh: làm và chỉnh xong mọi ảnh nhân vật / bối cảnh / panel rồi mới sang video -->
+        <div class="flex rounded-xl bg-slate-100 p-1 text-sm">
+          <button v-for="m in modes" :key="m.key" @click="setImagesOnly(m.key)" :title="m.title"
+            :class="imagesOnly === m.key ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-600 hover:text-slate-800'"
+            class="px-3 py-1 rounded-lg font-medium">{{ m.label }}</button>
+        </div>
+        <div><span class="text-slate-500">Còn chờ làm:</span> <b>{{ state?.remaining ?? '…' }}</b> {{ imagesOnly ? 'ảnh chưa có' : 'mục' }}</div>
+        <button v-if="imagesOnly" class="text-indigo-600 hover:underline text-xs" :disabled="scanning" @click="rescanImages"
+          title="Ảnh đã có trong Folder Ảnh thì không phải làm, chỉ cần tải lên Flow">
+          {{ scanning ? 'Đang quét Folder Ảnh…' : 'Quét lại Folder Ảnh' }}
+        </button>
         <div v-if="skipped.length"><span class="text-slate-500">Để sau:</span> <b>{{ skipped.length }}</b>
           <button class="ml-1 text-indigo-600 hover:underline" @click="clearSkipped">làm lại từ đầu</button></div>
         <div class="min-w-0 flex-1 truncate"><span class="text-slate-500">App chờ file tải về trong:</span>
@@ -142,6 +152,55 @@ const startedAt = ref(Date.now())
 const found = ref([])
 const downloadsDir = ref('')
 const autoImport = ref(true)
+const modes = [
+  { key: false, label: 'Theo cảnh', title: 'Từng cảnh: ảnh còn thiếu của cảnh trước, rồi video của cảnh đó' },
+  { key: true, label: 'Chỉ làm ảnh', title: 'Làm hết ảnh nhân vật / bối cảnh / panel trước (chỉnh nhân vật cho ưng), rồi mới sang video' },
+]
+/** Nhớ theo từng phim trên máy này */
+const imagesOnlyKey = () => `afm.manualImagesOnly.${store.current?.project.id}`
+const imagesOnly = ref(false)
+function loadImagesOnly() {
+  try {
+    imagesOnly.value = localStorage.getItem(imagesOnlyKey()) === 'true'
+  } catch {
+    imagesOnly.value = false
+  }
+}
+function setImagesOnly(on) {
+  if (imagesOnly.value === on) return
+  imagesOnly.value = on
+  try {
+    localStorage.setItem(imagesOnlyKey(), String(on))
+  } catch {
+    /* không lưu được: chỉ là tiện ích */
+  }
+  skipped.value = []
+  if (on) rescanImages()
+  else load()
+}
+
+/**
+ * Ảnh đã có trong Folder Ảnh (Ảnh tham chiếu) thì không cần làm, chỉ cần tải lên Flow: quét lại thư mục để ảnh bạn mới
+ * bỏ vào cũng được nhận là "ảnh có sẵn" (prompt tạo ảnh đó được bỏ qua). Chỉ còn lại ảnh thật sự chưa có.
+ */
+const scanning = ref(false)
+async function rescanImages() {
+  const p = store.current?.project
+  if (!p?.imageDir || scanning.value) return load()
+  scanning.value = true
+  try {
+    const r = await projectsApi.importAssetFolder(p.id, p.imageDir)
+    if (r.added + r.replaced > 0) {
+      store.toast(`Đã nhận ${r.added + r.replaced} ảnh có sẵn trong Folder Ảnh` + (r.skippedJobs ? `, bỏ qua ${r.skippedJobs} ảnh khỏi phải làm` : ''), 'success')
+    }
+  } catch (e) {
+    store.toast('Không quét được Folder Ảnh: ' + errMsg(e), 'error')
+  } finally {
+    scanning.value = false
+  }
+  store.refresh()
+  await load()
+}
 const importing = ref('')
 const copied = ref(false)
 
@@ -159,7 +218,12 @@ function collect(re, text) {
 const tags = computed(() => {
   const text = job.value?.prompt || ''
   const declared = collect(new RegExp(ID + '\\s*=', 'g'), text)
-  return declared.length ? declared : collect(new RegExp(ID, 'g'), text)
+  const out = declared.length ? declared : collect(new RegExp(ID, 'g'), text)
+  // Ảnh (biến thể trang phục, panel…): Flow chỉ dùng ảnh gốc được @ trong ô prompt, kể cả khi prompt nhắc ID trần
+  if (job.value?.kind === 'IMAGE') {
+    for (const r of job.value.references || []) if (!out.includes(r.id)) out.push(r.id)
+  }
+  return out
 })
 
 /** Tag đã gắn trong cảnh đang làm */
@@ -204,7 +268,7 @@ async function load() {
   loading.value = true
   try {
     const prev = job.value?.id
-    state.value = await manualApi.next(store.current.project.id, skipped.value)
+    state.value = await manualApi.next(store.current.project.id, skipped.value, imagesOnly.value)
     if (job.value?.id !== prev) {
       startedAt.value = Date.now()
       found.value = []
@@ -341,7 +405,8 @@ watch(() => store.current?.project.id, (id) => {
   skipped.value = []
   state.value = null
   loadOnFlow()
-  if (id) load()
+  loadImagesOnly()
+  if (id) imagesOnly.value ? rescanImages() : load()
 }, { immediate: true })
 
 let timer

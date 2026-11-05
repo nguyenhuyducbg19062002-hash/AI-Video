@@ -17,8 +17,9 @@ public class ManualController {
     private final JobQueryService query;
 
     @GetMapping("/projects/{projectId}/manual/next")
-    public ManualService.NextScene next(@PathVariable long projectId, @RequestParam(required = false) List<Long> skip) {
-        return manual.next(projectId, skip == null ? List.of() : skip);
+    public ManualService.NextScene next(@PathVariable long projectId, @RequestParam(required = false) List<Long> skip,
+                                       @RequestParam(defaultValue = "false") boolean imagesOnly) {
+        return manual.next(projectId, skip == null ? List.of() : skip, imagesOnly);
     }
 
     @PostMapping("/jobs/{id}/manual/open-refs")

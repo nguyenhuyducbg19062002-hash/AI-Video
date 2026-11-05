@@ -75,9 +75,11 @@ export const jobsApi = {
 
 /** Chế độ "Tự làm trên Flow": app bày cảnh, người dùng tự tạo trên Flow, app nhận file tải về */
 export const manualApi = {
-  /** Cảnh kế tiếp cần làm; skip = các cảnh đã bấm "Để sau" */
-  next: (projectId, skip = []) =>
-    data(http.get(`/projects/${projectId}/manual/next`, { params: skip.length ? { skip: skip.join(',') } : {} })),
+  /** Cảnh kế tiếp cần làm; skip = các cảnh đã bấm "Để sau"; imagesOnly = "Chỉ làm ảnh" (làm hết ảnh trước video) */
+  next: (projectId, skip = [], imagesOnly = false) =>
+    data(http.get(`/projects/${projectId}/manual/next`, {
+      params: { ...(skip.length ? { skip: skip.join(',') } : {}), imagesOnly },
+    })),
   /** Chép ảnh reference của cảnh ra một thư mục riêng và mở Explorer để kéo thả vào Flow */
   openRefs: (jobId, only) =>
     data(http.post(`/jobs/${jobId}/manual/open-refs`, null, { params: only ? { only: only.join(',') } : {} })),

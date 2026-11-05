@@ -202,9 +202,27 @@ public class JobClaimService {
      * phim. Dùng cho chế độ "Tự làm trên Flow": app chỉ bày cảnh ra, người dùng tự tạo trên Flow. Gọi trong transaction.
      */
     public Optional<JobEntity> peekNext(ProjectEntity p, Set<Long> skip) {
+        return peekNext(p, skip, false);
+    }
+
+    /**
+     * imagesOnly: "Chỉ làm ảnh" - mọi ảnh còn chờ tạo của phim (nhân vật, bối cảnh, panel), kể cả ảnh của cảnh chưa tới lượt,
+     * theo thứ tự file (ảnh gốc trước ảnh panel). Ảnh cần ảnh khác chưa có (panel cần ảnh nhân vật) chỉ ra sau khi đủ ảnh đó.
+     */
+    public Optional<JobEntity> peekNext(ProjectEntity p, Set<Long> skip, boolean imagesOnly) {
         Set<Long> s = new HashSet<>(skip);
         s.add(-1L);   // NOT IN không được rỗng
-        return jobs.findNextRunnable(p.getId(), 0, 1, 0, s).or(() -> nextBySceneOrder(p, p.isSelectedOnlyOn(), s));
+        if (!imagesOnly) {
+            return jobs.findNextRunnable(p.getId(), 0, 1, 0, s).or(() -> nextBySceneOrder(p, p.isSelectedOnlyOn(), s));
+        }
+        for (int guard = 0; guard < 20; guard++) {
+            Optional<JobEntity> next = jobs.findNextRunnable(p.getId(), 1, 0, 0, s);
+            if (next.isEmpty() || next.get().getKind() == PromptKind.IMAGE) {
+                return next;
+            }
+            s.add(next.get().getId());   // video được bấm "Chạy cảnh này" (ưu tiên) vẫn lọt qua imagesOnly: bỏ qua
+        }
+        return Optional.empty();
     }
 
     /**
