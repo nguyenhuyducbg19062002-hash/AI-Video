@@ -145,6 +145,47 @@
     @apply text-[22px] font-semibold text-slate-900 tabular-nums leading-tight mt-1;
   }
 
+  /* Ô icon vuông bo góc (đặt trước tiêu đề, số liệu, thư mục…). Màu: thêm lớp icon-tile-<màu> */
+  .icon-tile {
+    @apply inline-flex items-center justify-center w-9 h-9 rounded-[10px] shrink-0;
+  }
+  .icon-tile-indigo { @apply bg-indigo-50 text-indigo-600; }
+  .icon-tile-sky { @apply bg-sky-50 text-sky-600; }
+  .icon-tile-emerald { @apply bg-emerald-50 text-emerald-600; }
+  .icon-tile-amber { @apply bg-amber-50 text-amber-600; }
+  .icon-tile-rose { @apply bg-rose-50 text-rose-600; }
+  .icon-tile-violet { @apply bg-violet-50 text-violet-600; }
+  .icon-tile-slate { @apply bg-slate-100 text-slate-500; }
+
+  /* Nhãn nhỏ có icon: chế độ chạy, nền tảng, cài đặt phim */
+  .chip {
+    @apply inline-flex items-center gap-1.5 h-7 px-2.5 rounded-lg bg-slate-50 border border-slate-200 text-[12px] text-slate-600 whitespace-nowrap;
+  }
+  .chip b {
+    @apply font-semibold text-slate-900;
+  }
+
+  /* Ô hành động: icon + tên + một dòng giải thích (nhóm "Nạp dữ liệu") */
+  .action-tile {
+    @apply flex items-center gap-3 w-full text-left p-3 rounded-xl border border-slate-200 bg-white cursor-pointer transition
+      hover:border-indigo-300 hover:bg-indigo-50/40 hover:shadow-[0_1px_3px_rgba(16,24,40,0.06)]
+      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400;
+  }
+  .action-tile-title {
+    @apply block text-[13px] font-medium text-slate-900 leading-snug;
+  }
+  .action-tile-hint {
+    @apply block text-[11.5px] text-slate-500 leading-snug mt-0.5;
+  }
+
+  /* Thanh tiến độ */
+  .progress {
+    @apply h-2 rounded-full bg-slate-100 overflow-hidden;
+  }
+  .progress > span {
+    @apply block h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500 transition-[width] duration-500;
+  }
+
   /* Bảng */
   .table {
     @apply w-full text-left text-[13px];
