@@ -23,7 +23,7 @@ public interface JobRepository extends JpaRepository<JobEntity, Long> {
     @Query(value = """
             SELECT j.* FROM jobs j
             JOIN prompts p ON p.id = j.prompt_id
-            WHERE j.project_id = :projectId AND j.status = 'PENDING'
+            WHERE j.project_id = :projectId AND j.status = 'PENDING' AND j.id NOT IN (:skip)
               AND (:imagesOnly = 0 OR p.kind = 'IMAGE' OR COALESCE(j.run_priority, 0) > 0)
               AND (:selectedOnly = 0 OR COALESCE(j.run_priority, 0) > 0)
               AND (:skipMissing = 0 OR p.kind = 'VIDEO' OR COALESCE(j.run_priority, 0) > 0)
@@ -36,7 +36,8 @@ public interface JobRepository extends JpaRepository<JobEntity, Long> {
                      COALESCE(p.source_order, 0), p.seq_no
             LIMIT 1""", nativeQuery = true)
     Optional<JobEntity> findNextRunnable(@Param("projectId") long projectId, @Param("imagesOnly") int imagesOnly,
-                                         @Param("selectedOnly") int selectedOnly, @Param("skipMissing") int skipMissing);
+                                         @Param("selectedOnly") int selectedOnly, @Param("skipMissing") int skipMissing,
+                                         @Param("skip") Collection<Long> skip);
 
     /** Các video PENDING của phim theo thứ tự cảnh (thứ tự file Excel rồi thứ tự dòng). Dùng cho chế độ chạy theo cảnh. */
     @Query(value = """
@@ -66,6 +67,10 @@ public interface JobRepository extends JpaRepository<JobEntity, Long> {
     List<JobEntity> findByStatus(JobStatus status);
 
     List<JobEntity> findByStatusAndHeartbeatAtBefore(JobStatus status, LocalDateTime limit);
+
+    List<JobEntity> findByStatusAndWorkerId(JobStatus status, String workerId);
+
+    boolean existsByAccountIdAndStatusIn(Long accountId, Collection<JobStatus> statuses);
 
     Optional<JobEntity> findByPromptId(Long promptId);
 

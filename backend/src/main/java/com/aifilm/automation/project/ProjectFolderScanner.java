@@ -29,7 +29,7 @@ public final class ProjectFolderScanner {
     private static final List<String> VIDEO_EXACT = List.of("phim", "video", "videos", "clip", "clips", "movie", "movies");
     private static final List<String> VIDEO_CONTAINS = List.of("video", "phim", "clip", "movie");
 
-    private static final Set<String> PROMPT_FILES = Set.of("reference-prompts.xlsx", "prompt-anh-panel.xlsx",
+    static final Set<String> PROMPT_FILES = Set.of("reference-prompts.xlsx", "prompt-anh-panel.xlsx",
             "all-video-prompts.xlsx", "reference-prompts.txt", "prompt-anh-panel.txt", "final_video_prompts.txt");
     private static final Set<String> IMAGE_EXT = Set.of("png", "jpg", "jpeg", "webp");
     private static final Set<String> VIDEO_EXT = Set.of("mp4", "mov", "webm", "mkv");
@@ -110,10 +110,36 @@ public final class ProjectFolderScanner {
         }
         for (String key : contains) {
             for (Path d : candidates) {
-                if (norm(d.getFileName().toString()).contains(key)) return d;
+                if (hasWord(d.getFileName().toString(), key)) return d;
             }
         }
         return null;
+    }
+
+    /**
+     * Tên có từ khóa ở ĐẦU một từ: "Ảnh gốc", "hinh-anh", "tham chiếu 2" khớp "anh" / "thamchieu";
+     * "Thành phẩm", "Cảnh quay", "Doanh thu" thì không (chỉ chứa "anh" giữa từ).
+     */
+    static boolean hasWord(String name, String key) {
+        String t = Normalizer.normalize(name.replace('đ', 'd').replace('Đ', 'D'), Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "").toLowerCase(Locale.ROOT);
+        StringBuilder joined = new StringBuilder();
+        Set<Integer> starts = new java.util.HashSet<>();
+        boolean inWord = false;
+        for (char c : t.toCharArray()) {
+            boolean word = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
+            if (word && !inWord) {
+                starts.add(joined.length());
+            }
+            if (word) {
+                joined.append(c);
+            }
+            inWord = word;
+        }
+        for (int i = joined.indexOf(key); i >= 0; i = joined.indexOf(key, i + 1)) {
+            if (starts.contains(i)) return true;
+        }
+        return false;
     }
 
     private static int countFiles(Path dir, Set<String> exts) {

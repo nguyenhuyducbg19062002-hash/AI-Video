@@ -56,38 +56,38 @@ class JobClaimServiceSceneOrderTest {
 
     @Test
     void sceneMissingImage_generatesThatImageFirst() {
-        assertEquals(200L, service.nextBySceneOrder(project).orElseThrow().getId());
+        assertEquals(200L, service.nextBySceneOrder(project, java.util.Set.of()).orElseThrow().getId());
     }
 
     @Test
     void imageWaitingReview_sceneWaits_nextSceneRuns() {
         panel1.setStatus(JobStatus.AWAITING_REVIEW);
-        assertEquals(101L, service.nextBySceneOrder(project).orElseThrow().getId());
+        assertEquals(101L, service.nextBySceneOrder(project, java.util.Set.of()).orElseThrow().getId());
     }
 
     @Test
     void allImagesPresent_noImageIsGenerated_videoRunsInOrder() {
         when(assets.findByProjectId(1L)).thenReturn(List.of(asset("CHAR-A"), asset("PANEL-1")));
-        assertEquals(100L, service.nextBySceneOrder(project).orElseThrow().getId());
+        assertEquals(100L, service.nextBySceneOrder(project, java.util.Set.of()).orElseThrow().getId());
     }
 
     @Test
     void missingImageWithoutPrompt_sceneSkipped() {
         when(jobs.findImageJob(eq(1L), eq("PANEL-1"))).thenReturn(Optional.empty());
-        assertEquals(101L, service.nextBySceneOrder(project).orElseThrow().getId());
+        assertEquals(101L, service.nextBySceneOrder(project, java.util.Set.of()).orElseThrow().getId());
     }
 
     @Test
     void panelNeedsMissingBaseImage_generatesBaseImageFirst() {
         refs(20L, "CHAR-B");   // PANEL-1 giờ cần CHAR-B (chưa có) thay vì CHAR-A
         when(jobs.findImageJob(eq(1L), eq("CHAR-B"))).thenReturn(Optional.of(charB));
-        assertEquals(201L, service.nextBySceneOrder(project).orElseThrow().getId());
+        assertEquals(201L, service.nextBySceneOrder(project, java.util.Set.of()).orElseThrow().getId());
     }
 
     @Test
     void nothingToDo_whenOnlyImagesPendingAndNoSceneNeedsThem() {
         when(jobs.findPendingVideoJobsInOrder(anyLong())).thenReturn(List.of());
-        assertTrue(service.nextBySceneOrder(project).isEmpty());
+        assertTrue(service.nextBySceneOrder(project, java.util.Set.of()).isEmpty());
     }
 
     private void refs(long promptId, String... ids) {

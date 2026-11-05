@@ -1,6 +1,7 @@
 package com.aifilm.automation.worker;
 
 import com.aifilm.automation.AiFlowAutomationApplication;
+import com.aifilm.automation.job.JobResultService;
 import com.aifilm.automation.service.AppSettingsService;
 import com.aifilm.automation.system.AppPaths;
 import com.aifilm.automation.system.DesktopWindow;
@@ -17,8 +18,10 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Bật N tiến trình Python worker khi app khởi động, bật lại khi một tiến trình chết, tắt hết (kể cả Edge con) khi app tắt.
@@ -32,7 +35,12 @@ public class PythonWorkerSupervisor {
     private final WorkerToken token;
     private final AppSettingsService settings;
     private final DesktopWindow desktopWindow;
+    private final JobResultService results;
     private final List<Process> workers = new ArrayList<>();
+    /** Bật worker lỗi: lần thử kế tiếp ở lượt watchdog thứ mấy, và số lần lỗi liên tiếp (giãn dần tới ~10 phút). */
+    private final Map<Integer, Long> retryTick = new HashMap<>();
+    private final Map<Integer, Integer> spawnFailures = new HashMap<>();
+    private long tick;
     private volatile boolean stopping;
 
     @EventListener(ApplicationReadyEvent.class)
@@ -43,7 +51,7 @@ public class PythonWorkerSupervisor {
         } else {
             int n = Math.max(1, settings.getIntSetting("worker_processes", 3));
             for (int i = 0; i < n; i++) {
-                workers.add(spawn("py-" + i));
+                workers.add(spawnSlot(i));
             }
             log.info("Đã bật {} worker Python", n);
         }
@@ -55,11 +63,15 @@ public class PythonWorkerSupervisor {
         if (stopping) {
             return;
         }
+        tick++;
         for (int i = 0; i < workers.size(); i++) {
             Process p = workers.get(i);
             if (p != null && !p.isAlive()) {
                 log.warn("Worker py-{} đã dừng (exit {}), bật lại", i, p.exitValue());
-                workers.set(i, spawn("py-" + i));
+                releaseJobs(i);
+                workers.set(i, spawnSlot(i));
+            } else if (p == null && tick >= retryTick.getOrDefault(i, 0L)) {
+                workers.set(i, spawnSlot(i));
             }
         }
     }
@@ -72,10 +84,14 @@ public class PythonWorkerSupervisor {
     public synchronized void resize(int n) {
         n = Math.max(1, n);
         while (workers.size() < n) {
-            workers.add(spawn("py-" + workers.size()));
+            workers.add(spawnSlot(workers.size()));
         }
         while (workers.size() > n) {
-            kill(workers.remove(workers.size() - 1));
+            int i = workers.size() - 1;
+            kill(workers.remove(i));
+            retryTick.remove(i);
+            spawnFailures.remove(i);
+            releaseJobs(i);
         }
     }
 
@@ -90,11 +106,42 @@ public class PythonWorkerSupervisor {
         if (p == null) {
             return;
         }
-        p.descendants().forEach(ProcessHandle::destroy);   // Edge do Playwright mở
+        List<ProcessHandle> children = p.descendants().toList();   // Edge do Playwright mở
+        children.forEach(ProcessHandle::destroy);
         p.destroy();
+        try {
+            if (!p.waitFor(5, TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            p.destroyForcibly();
+        }
+        children.stream().filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroyForcibly);
     }
 
-    private Process spawn(String id) {
+    /** Worker vừa chết / bị tắt: job nó đang làm về hàng đợi ngay, không chờ reaper 5 phút. */
+    private void releaseJobs(int slot) {
+        try {
+            results.releaseWorkerJobs("py-" + slot);
+        } catch (RuntimeException e) {
+            log.error("Không trả được job của worker py-{} về hàng đợi: {}", slot, e.toString());
+        }
+    }
+
+    private Process spawnSlot(int i) {
+        Process p = spawn("py-" + i);
+        if (p != null) {
+            retryTick.remove(i);
+            spawnFailures.remove(i);
+        } else {
+            int fails = spawnFailures.merge(i, 1, Integer::sum);
+            retryTick.put(i, tick + Math.min(1L << Math.min(fails, 6), 40L));
+        }
+        return p;
+    }
+
+    Process spawn(String id) {
         Path home = AppPaths.home();
         Path bundled = home.resolve("python").resolve("python.exe");
         Path script = home.resolve("engine").resolve("worker_main.py");
@@ -114,7 +161,7 @@ public class PythonWorkerSupervisor {
             return pb.start();
         } catch (IOException e) {
             log.error("Không chạy được worker Python {}: {}", cmd, e.getMessage());
-            return null;   // watchdog bỏ qua; trang Hệ thống báo 0 worker
+            return null;   // watchdog thử lại sau (giãn dần); trang Hệ thống báo thiếu worker
         }
     }
 }

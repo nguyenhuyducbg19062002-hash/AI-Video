@@ -11,6 +11,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from .errors import TransientError
+
 
 def prepare_refs_folder(job: dict) -> Path | None:
     images = job.get("referenceImages") or []
@@ -23,7 +25,10 @@ def prepare_refs_folder(job: dict) -> Path | None:
     for i, src in enumerate(images, start=1):
         p = Path(src)
         if p.is_file():
-            shutil.copy2(p, folder / f"{i:02d}_{p.name}")
+            try:
+                shutil.copy2(p, folder / f"{i:02d}_{p.name}")
+            except OSError as e:
+                raise TransientError(f"Không chép được ảnh reference {p.name} vào thư mục ảnh cần gắn: {e}") from e
     return folder
 
 
