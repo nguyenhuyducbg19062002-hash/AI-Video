@@ -27,7 +27,6 @@
             <tr>
               <th>Ưu tiên</th>
               <th>Tài khoản</th>
-              <th>Nền tảng</th>
               <th>Trạng thái</th>
               <th>Dùng gần nhất</th>
               <th class="text-right">Thao tác</th>
@@ -35,21 +34,21 @@
           </thead>
           <tbody>
             <tr v-if="!store.accounts.length">
-              <td colspan="6" class="!py-12 text-center">
-                <User class="w-8 h-8 mx-auto text-indigo-300" />
-                <div class="text-sm text-slate-600 mt-2">Chưa có tài khoản nào</div>
-                <div class="text-xs text-slate-400 mt-0.5">Thêm ít nhất một tài khoản Google Flow để bắt đầu.</div>
+              <td colspan="5" class="!py-12 text-center">
+                <User class="w-10 h-10 mx-auto text-slate-300" />
+                <div class="text-sm font-medium text-slate-700 mt-2">Chưa có tài khoản nào</div>
+                <div class="text-xs text-slate-500 mt-0.5">Thêm ít nhất một tài khoản Google Flow để bắt đầu.</div>
               </td>
             </tr>
             <tr v-for="a in store.accounts" :key="a.id">
               <td class="font-mono text-xs text-slate-500">{{ a.priority }}</td>
               <td>
-                <div class="font-medium text-slate-800">{{ a.email }}</div>
+                <div class="font-medium text-slate-900 break-all">{{ a.email }}</div>
+                <div class="text-[11px] text-slate-500 mt-0.5">{{ providerLabel(a.provider) }}</div>
                 <div v-if="a.proxy" class="text-[11px] font-mono text-indigo-600 mt-0.5">proxy {{ a.proxy }}</div>
                 <div v-if="a.maxConcurrent > 1" class="text-[11px] text-emerald-700 mt-0.5">chạy {{ a.maxConcurrent }} lệnh cùng lúc</div>
                 <div v-if="a.notes" class="text-[11px] text-slate-500 mt-0.5">{{ a.notes }}</div>
               </td>
-              <td class="text-xs text-slate-600">{{ providerLabel(a.provider) }}</td>
               <td>
                 <StatusBadge :status="a.status" />
                 <div v-if="checking[a.id]" class="text-[11px] text-indigo-600 mt-1">đang kiểm tra đăng nhập…</div>
@@ -57,8 +56,9 @@
                 <div v-if="a.status === 'COOLDOWN' && a.cooldownUntil" class="text-[11px] text-amber-600 mt-1">tới {{ fmt(a.cooldownUntil) }}</div>
                 <div v-if="a.lastErrorMessage" class="text-[11px] text-rose-600 mt-1 max-w-xs truncate" :title="a.lastErrorMessage">{{ a.lastErrorMessage }}</div>
               </td>
-              <td class="text-xs text-slate-500">{{ a.lastUsedAt ? fmt(a.lastUsedAt) : 'Chưa dùng' }}</td>
-              <td class="text-right whitespace-nowrap space-x-1">
+              <td class="text-xs text-slate-500 whitespace-nowrap tabular-nums">{{ a.lastUsedAt ? fmt(a.lastUsedAt) : 'Chưa dùng' }}</td>
+              <td class="w-[1%]">
+                <div class="flex flex-wrap justify-end gap-1 min-w-[200px]">
                 <template v-if="a.provider === 'FLOW_BROWSER'">
                   <button @click="act(a, 'openLogin')" :disabled="a.status === 'LEASED'" class="btn btn-sm"><KeyRound class="w-3 h-3" /> Đăng nhập</button>
                   <button @click="check(a)" :disabled="checking[a.id] || a.status === 'LEASED'" class="btn btn-sm"
@@ -69,8 +69,9 @@
                 </template>
                 <button v-if="['COOLDOWN', 'DISABLED'].includes(a.status)" @click="act(a, 'enable')" class="btn btn-sm">Bật lại</button>
                 <button v-if="['READY', 'COOLDOWN', 'NEED_LOGIN'].includes(a.status)" @click="act(a, 'disable')" class="btn btn-sm">Tắt</button>
-                <button @click="openModal(a)" class="btn btn-sm"><Pencil class="w-3 h-3" /></button>
-                <button @click="remove(a)" :disabled="a.status === 'LEASED'" class="btn-danger btn-sm"><Trash2 class="w-3 h-3" /></button>
+                <button @click="openModal(a)" class="btn btn-sm" title="Sửa tài khoản"><Pencil class="w-3 h-3" /></button>
+                <button @click="remove(a)" :disabled="a.status === 'LEASED'" class="btn-danger btn-sm" title="Xóa tài khoản"><Trash2 class="w-3 h-3" /></button>
+                </div>
               </td>
             </tr>
           </tbody>

@@ -108,7 +108,7 @@
           </div>
 
           <!-- Nạp dữ liệu -->
-          <button @click="importMovieFolder" :disabled="busy" class="btn-primary w-full !py-2.5"
+          <button @click="importMovieFolder" :disabled="busy" class="btn w-full !h-10"
             title="Chọn thư mục phim (ví dụ D:\Dev\Tập 5. Hà - Cupid): app tự tìm file prompt ảnh/video (.xlsx, .txt) và ảnh có sẵn bên trong">
             <FolderOpen class="w-4 h-4" /> Nạp cả thư mục phim (Excel / .txt + ảnh có sẵn)
           </button>

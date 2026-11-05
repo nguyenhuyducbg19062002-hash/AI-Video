@@ -1,114 +1,97 @@
 <template>
-  <div class="h-full flex flex-col overflow-hidden">
-    <!-- Đầu trang: logo + tên + trạng thái -->
-    <header class="shrink-0 px-6 pt-5 pb-4 flex items-center justify-between gap-6">
-      <div class="flex items-center gap-4 min-w-0">
-        <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-500 shadow-lg shadow-indigo-300/50 flex items-center justify-center shrink-0">
-          <Clapperboard class="w-6 h-6 text-white" />
+  <div class="h-full flex overflow-hidden bg-[var(--bg)]">
+    <!-- Thanh bên: điều hướng, tách hẳn khỏi khu làm việc bằng nền tối -->
+    <aside class="w-[232px] shrink-0 flex flex-col bg-[var(--sidebar)] text-slate-300">
+      <div class="flex items-center gap-3 px-4 h-16 shrink-0">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center shrink-0">
+          <Clapperboard class="w-[18px] h-[18px] text-white" />
         </div>
-        <div class="min-w-0">
-          <h1 class="text-2xl font-semibold text-slate-800 tracking-tight truncate">AI FILM MAKER</h1>
-          <p class="text-sm text-slate-500">Không gian sản xuất ảnh reference &amp; video từ kịch bản</p>
+        <div class="min-w-0 leading-tight">
+          <div class="text-[15px] font-semibold text-white tracking-tight">AI Film Maker</div>
+          <div class="text-[11px] text-slate-400 truncate">Ảnh reference &amp; video</div>
         </div>
       </div>
 
-      <div class="card flex items-center divide-x divide-slate-200 px-1 py-2 shrink-0">
-        <div class="px-4">
-          <div class="text-[11px] text-slate-500">Trạng thái</div>
-          <div class="flex items-center gap-1.5 text-sm font-medium" :class="statusOk ? 'text-slate-700' : 'text-rose-600'">
-            <span class="w-2 h-2 rounded-full" :class="statusOk ? 'bg-emerald-500' : 'bg-rose-500'"></span>
-            {{ statusText }}
-          </div>
-        </div>
-        <div class="px-4 flex items-center gap-3">
-          <div class="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center">
-            <Users class="w-4 h-4 text-indigo-600" />
-          </div>
-          <div>
-            <div class="text-sm font-medium text-slate-700">{{ store.accounts.length }} tài khoản</div>
-            <div class="text-[11px] text-slate-500 flex items-center gap-1">
-              <span class="px-1.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">{{ store.readyAccounts }} sẵn sàng</span>
-            </div>
+      <div class="px-3 pb-3">
+        <label class="block text-[11px] font-medium text-slate-400 px-1 mb-1.5">Phim đang chọn</label>
+        <select :value="store.projectId ?? ''" @change="store.selectProject(Number($event.target.value))"
+          class="sidebar-select" :disabled="!store.projects.length">
+          <option v-if="!store.projects.length" value="">Chưa có phim</option>
+          <option v-for="pv in store.projects" :key="pv.project.id" :value="pv.project.id">{{ pv.project.name }}</option>
+        </select>
+      </div>
+
+      <nav class="px-3 space-y-0.5">
+        <button v-for="t in tabs" :key="t.key" @click="store.go(t.key)"
+          :class="store.view === t.key ? 'bg-white/10 text-white before:bg-indigo-400' : 'text-slate-300 hover:bg-white/5 hover:text-white before:bg-transparent'"
+          class="relative w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[13.5px] font-medium transition
+            before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[3px] before:rounded-full
+            focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">
+          <component :is="t.icon" class="w-[18px] h-[18px] shrink-0" :class="store.view === t.key ? 'text-indigo-300' : 'text-slate-400'" />
+          <span class="flex-1 text-left">{{ t.label }}</span>
+        </button>
+      </nav>
+
+      <!-- Hàng đợi của phim đang chọn -->
+      <div v-if="store.current" class="mx-3 mt-5 rounded-xl bg-white/[0.04] ring-1 ring-white/5 p-3">
+        <div class="text-[11px] font-medium text-slate-400 mb-2">Hàng đợi phim này</div>
+        <div class="space-y-1.5 text-[12.5px]">
+          <div v-for="q in queue" :key="q.label" class="flex items-center gap-2">
+            <span class="w-1.5 h-1.5 rounded-full" :class="q.dot"></span>
+            <span class="flex-1 text-slate-300">{{ q.label }}</span>
+            <span class="font-semibold tabular-nums text-white">{{ q.value }}</span>
           </div>
         </div>
       </div>
-    </header>
+
+      <div class="mt-auto p-3 space-y-1">
+        <div class="flex items-center gap-2.5 px-3 py-2 text-[12.5px] text-slate-400" :title="workers ? '' : 'Worker chỉ cần khi chạy tự động; Tự làm trên Flow không cần'">
+          <Cpu class="w-4 h-4" />
+          <span class="flex-1">Worker Python</span>
+          <span class="tabular-nums font-semibold" :class="workers ? 'text-emerald-400' : 'text-slate-500'">{{ workers }}</span>
+        </div>
+        <button @click="quit"
+          class="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] text-slate-400 hover:bg-rose-500/10 hover:text-rose-300 transition">
+          <Power class="w-4 h-4" />
+          <span>Thoát ứng dụng</span>
+        </button>
+      </div>
+    </aside>
 
     <div v-if="stopped" class="flex-1 flex items-center justify-center text-slate-500">
       Ứng dụng đã tắt. Bạn có thể đóng cửa sổ này.
     </div>
 
-    <div v-else class="flex-1 min-h-0 flex gap-5 px-6 pb-5">
-      <!-- Thanh bên trái -->
-      <aside class="card w-[236px] shrink-0 flex flex-col p-3 gap-3 min-h-0">
-        <div>
-          <div class="section-label px-2 mb-2">Phim đang chọn</div>
-          <select :value="store.projectId ?? ''" @change="store.selectProject(Number($event.target.value))"
-            class="input !py-1.5 !text-[13px] !bg-slate-50" :disabled="!store.projects.length">
-            <option v-if="!store.projects.length" value="">Chưa có phim</option>
-            <option v-for="pv in store.projects" :key="pv.project.id" :value="pv.project.id">{{ pv.project.name }}</option>
-          </select>
+    <!-- Khu làm việc -->
+    <div v-else class="flex-1 min-w-0 flex flex-col">
+      <!-- Thanh trên: tiêu đề màn + mô tả + quy trình + trạng thái (thay cho banner to) -->
+      <header class="h-16 shrink-0 bg-white border-b border-slate-200 px-6 flex items-center gap-6">
+        <div class="min-w-0 flex-1">
+          <h1 class="page-title truncate">{{ banner.title }}</h1>
+          <p class="text-[12.5px] text-slate-500 truncate">{{ banner.desc }}</p>
         </div>
-
-        <div>
-          <div class="section-label px-2 mb-1.5 mt-1">Sản xuất</div>
-          <nav class="space-y-1">
-            <button v-for="t in tabs" :key="t.key" @click="store.go(t.key)"
-              :class="store.view === t.key
-                ? 'bg-indigo-50 text-indigo-700 border-indigo-500'
-                : 'text-slate-600 border-transparent hover:bg-slate-50'"
-              class="w-full flex items-center gap-3 pl-3 pr-2 py-2.5 rounded-xl border-l-[3px] text-sm font-medium transition">
-              <span :class="store.view === t.key ? 'bg-white border-indigo-200 text-indigo-600' : 'border-slate-200 text-slate-500'"
-                class="w-7 h-7 rounded-lg border flex items-center justify-center">
-                <component :is="t.icon" class="w-4 h-4" />
-              </span>
-              <span class="flex-1 text-left">{{ t.label }}</span>
-            </button>
-          </nav>
-        </div>
-
-        <!-- Hàng đợi của phim đang chọn -->
-        <div v-if="store.current" class="rounded-xl border border-slate-200 bg-slate-50/60 p-3 text-xs space-y-1.5">
-          <div class="text-slate-500 font-medium mb-1">Hàng đợi phim này</div>
-          <div v-for="q in queue" :key="q.label" class="flex justify-between">
-            <span class="text-slate-600">{{ q.label }}</span>
-            <span class="font-semibold" :class="q.cls">{{ q.value }}</span>
-          </div>
-        </div>
-
-        <div class="mt-auto space-y-2">
-          <div class="flex items-center gap-3 px-3 py-2 rounded-xl text-sm text-slate-600">
-            <Cpu class="w-4 h-4 text-slate-500" />
-            <span class="flex-1">Worker Python</span>
-            <span class="text-xs font-semibold" :class="workers ? 'text-emerald-600' : 'text-rose-600'">{{ workers }}</span>
-            <span class="w-2 h-2 rounded-full" :class="workers ? 'bg-emerald-500' : 'bg-rose-500'"></span>
-          </div>
-          <button @click="quit" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-600 hover:bg-rose-50 hover:border-rose-200 hover:text-rose-600 transition">
-            <Power class="w-4 h-4" />
-            <span>Thoát ứng dụng</span>
+        <ol class="hidden xl:flex items-center gap-1.5 text-[12px] font-medium shrink-0">
+          <template v-for="(s, i) in steps" :key="s">
+            <ChevronRight v-if="i" class="w-3.5 h-3.5 text-slate-300" />
+            <li :class="i === banner.step ? 'bg-indigo-50 text-indigo-700' : 'text-slate-400'" class="px-2 py-1 rounded-md">
+              {{ i + 1 }}. {{ s }}
+            </li>
+          </template>
+        </ol>
+        <div class="flex items-center gap-3 shrink-0 pl-6 border-l border-slate-200">
+          <span class="inline-flex items-center gap-1.5 text-[12.5px] font-medium" :class="statusCls">
+            <span class="w-2 h-2 rounded-full" :class="statusDot"></span>{{ statusText }}
+          </span>
+          <button @click="store.go('accounts')" class="inline-flex items-center gap-1.5 text-[12.5px] text-slate-600 hover:text-indigo-700"
+            title="Tài khoản sẵn sàng / tổng số tài khoản">
+            <Users class="w-4 h-4 text-slate-400" />
+            <span class="tabular-nums"><b class="text-slate-900">{{ store.readyAccounts }}</b>/{{ store.accounts.length }} tài khoản</span>
           </button>
         </div>
-      </aside>
+      </header>
 
-      <!-- Nội dung -->
-      <main class="flex-1 min-w-0 flex flex-col gap-4 min-h-0">
-        <section class="shrink-0 rounded-2xl px-6 py-4 text-white bg-gradient-to-r from-[#0e1f4d] via-[#173a6e] to-[#1d6579] shadow-md flex items-center justify-between gap-6">
-          <div>
-            <div class="text-[11px] font-semibold tracking-widest text-cyan-300 uppercase">{{ banner.label }}</div>
-            <div class="text-2xl font-semibold mt-0.5">{{ banner.title }}</div>
-          </div>
-          <div class="text-right hidden lg:block">
-            <div class="flex items-center justify-end gap-2 text-sm font-semibold">
-              <template v-for="(s, i) in steps" :key="s">
-                <ArrowRight v-if="i" class="w-3.5 h-3.5 text-cyan-300" />
-                <span :class="i === banner.step ? 'text-white' : 'text-slate-300/80'">{{ String(i + 1).padStart(2, '0') }} {{ s }}</span>
-              </template>
-            </div>
-            <div class="text-xs text-slate-300 mt-1">{{ banner.desc }}</div>
-          </div>
-        </section>
-
-        <div class="flex-1 min-h-0 overflow-y-auto pr-1 -mr-1">
+      <main class="flex-1 min-h-0 overflow-y-auto">
+        <div class="max-w-[1600px] mx-auto p-6">
           <ProjectsView v-if="store.view === 'projects'" />
           <ScenesView v-else-if="store.view === 'scenes'" />
           <ManualView v-else-if="store.view === 'manual'" />
@@ -135,7 +118,7 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { ArrowRight, Clapperboard, Cpu, Film, Hand, LayoutList, Power, Settings, User, Users } from 'lucide-vue-next'
+import { ChevronRight, Clapperboard, Cpu, Film, Hand, LayoutList, Power, Settings, User, Users } from 'lucide-vue-next'
 import ManualView from './views/ManualView.vue'
 import ProjectsView from './views/ProjectsView.vue'
 import ScenesView from './views/ScenesView.vue'
@@ -154,27 +137,29 @@ const tabs = [
 
 const steps = ['Tài khoản', 'Phim', 'Lưu vào folder']
 const BANNERS = {
-  accounts: { label: 'Tài khoản', title: 'Tài khoản xoay vòng', step: 0, desc: 'Đăng nhập Google Flow một lần cho mỗi tài khoản; hết quota sẽ tự chuyển tài khoản.' },
-  projects: { label: 'Phim', title: 'Phim & hàng đợi', step: 1, desc: 'Thêm Excel ảnh / video của Omni và ảnh có sẵn; chạy ảnh trước rồi tới video.' },
-  scenes: { label: 'Phim', title: 'Danh sách cảnh', step: 1, desc: 'Từng cảnh theo thứ tự file: mô tả, prompt, ảnh reference (+ thêm ảnh), so sánh kết quả.' },
-  manual: { label: 'Phim', title: 'Tự làm trên Flow', step: 1, desc: 'App bày từng cảnh; bạn dán prompt, gắn ảnh, bấm Tạo và Tải xuống trên Flow; app tự nhận file và đặt đúng tên.' },
-  settings: { label: 'Hệ thống', title: 'Cài đặt', step: -1, desc: 'Số worker, thời gian chờ render, thời gian nghỉ khi hết quota.' },
+  accounts: { title: 'Tài khoản', step: 0, desc: 'Đăng nhập Google Flow một lần cho mỗi tài khoản; hết quota sẽ tự chuyển tài khoản.' },
+  projects: { title: 'Phim & hàng đợi', step: 1, desc: 'Thêm Excel ảnh / video của Omni và ảnh có sẵn; chạy ảnh trước rồi tới video.' },
+  scenes: { title: 'Danh sách cảnh', step: 1, desc: 'Từng cảnh theo thứ tự file: mô tả, prompt, ảnh reference, kết quả.' },
+  manual: { title: 'Tự làm trên Flow', step: 1, desc: 'Bạn dán prompt, gắn ảnh, bấm Tạo và Tải xuống trên Flow; app tự nhận file và đặt đúng tên.' },
+  settings: { title: 'Cài đặt', step: -1, desc: 'Số worker, thời gian chờ render, thời gian nghỉ khi hết quota.' },
 }
 const banner = computed(() => BANNERS[store.view] || BANNERS.projects)
 
 const stopped = ref(false)
 const workers = computed(() => store.info?.workersAlive ?? 0)
-const statusOk = computed(() => store.online && workers.value > 0)
-const statusText = computed(() => (!store.online ? 'Mất kết nối' : workers.value ? 'Ready' : 'Không có worker'))
+// 0 worker không phải lỗi: Tự làm trên Flow không cần worker
+const statusText = computed(() => (!store.online ? 'Mất kết nối' : workers.value ? 'Sẵn sàng' : 'Chế độ tay'))
+const statusCls = computed(() => (!store.online ? 'text-rose-600' : workers.value ? 'text-emerald-700' : 'text-slate-600'))
+const statusDot = computed(() => (!store.online ? 'bg-rose-500' : workers.value ? 'bg-emerald-500' : 'bg-slate-400'))
 
 const queue = computed(() => {
   const c = store.current?.counts || {}
   return [
-    { label: 'Chờ chạy', value: c.PENDING ?? 0, cls: 'text-slate-700' },
-    { label: 'Đang tạo', value: c.GENERATING ?? 0, cls: 'text-sky-600' },
-    { label: 'Xong', value: c.SUCCESS ?? 0, cls: 'text-emerald-600' },
-    { label: 'Có sẵn / đã hủy', value: c.CANCELLED ?? 0, cls: 'text-slate-500' },
-    { label: 'Lỗi', value: c.FAILED ?? 0, cls: 'text-rose-600' },
+    { label: 'Chờ chạy', value: c.PENDING ?? 0, dot: 'bg-slate-400' },
+    { label: 'Đang tạo', value: c.GENERATING ?? 0, dot: 'bg-sky-400' },
+    { label: 'Xong', value: c.SUCCESS ?? 0, dot: 'bg-emerald-400' },
+    { label: 'Có sẵn / đã hủy', value: c.CANCELLED ?? 0, dot: 'bg-slate-500' },
+    { label: 'Lỗi', value: c.FAILED ?? 0, dot: 'bg-rose-400' },
   ]
 })
 
