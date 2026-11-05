@@ -51,6 +51,8 @@ public class OmniImportService {
 
     /** ID dùng làm tên file trên Windows: chỉ chữ, số, gạch nối, gạch dưới. */
     private static final Pattern SAFE_ID = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$");
+    /** Nhập tay ảnh: "ID: prompt" / "ID | prompt", ID gồm chữ HOA / số, có ít nhất một gạch nối. */
+    private static final Pattern MANUAL_ID = Pattern.compile("^([A-Z0-9][A-Z0-9_]*(?:-[A-Z0-9_]+)+)\\s*[:|\\t]\\s*(.+)$");
 
     private final ProjectRepository projects;
     private final PromptRepository prompts;
@@ -72,6 +74,13 @@ public class OmniImportService {
 
     record Line(int order, String id, String prompt, List<String> refs, String note) {}
 
+    /** Thư mục không có file prompt nào để nạp (lúc tạo phim: không phải lỗi). */
+    public static class NoPromptFileException extends IllegalArgumentException {
+        NoPromptFileException(String message) {
+            super(message);
+        }
+    }
+
     private final AssetService assetService;
 
     /** Nạp một file Excel (tải lên từ giao diện). kind = IMAGE hoặc VIDEO; sai loại file thì báo lỗi rõ ràng. */
@@ -87,12 +96,26 @@ public class OmniImportService {
      * Ảnh cần gắn đọc từ khai báo "@ID =" trong prompt.
      */
     public ImportResult importTxt(long projectId, PromptKind kind, Path file) throws IOException {
+        return importLines(projectId, kind, file.getFileName().toString(), txtLines(kind, file));
+    }
+
+    /** Các dòng prompt của file .txt. Ảnh gốc: ID lấy theo số thứ tự trong reference-id-list.txt, số dòng hai file phải khớp. */
+    static List<Line> txtLines(PromptKind kind, Path file) throws IOException {
         List<String> lines = Files.readAllLines(file, java.nio.charset.StandardCharsets.UTF_8).stream()
-                .map(s -> s.replace("\uFEFF", "").trim()).filter(s -> !s.isEmpty()).toList();
+                .map(s -> s.replace("FEFF", "").trim()).filter(s -> !s.isEmpty()).toList();
         String name = file.getFileName().toString();
+        boolean panel = name.toLowerCase(Locale.ROOT).contains("panel");
+        Map<Integer, String> idList = Map.of();
+        if (kind == PromptKind.IMAGE && !panel) {
+            idList = readIdList(file.resolveSibling("reference-id-list.txt"));
+            if (idList.isEmpty()) {
+                throw new IllegalArgumentException(name + ": không biết ID ảnh. Cần file reference-id-list.txt cùng thư mục, hoặc dùng file Excel.");
+            }
+            if (idList.size() != lines.size()) {
+                throw new IllegalArgumentException(name + " có " + lines.size() + " prompt nhưng reference-id-list.txt có " + idList.size() + " ID: hai file phải khớp nhau");
+            }
+        }
         List<Line> rows = new ArrayList<>();
-        List<String> idList = kind == PromptKind.IMAGE && !name.toLowerCase(Locale.ROOT).contains("panel")
-                ? readIdList(file.resolveSibling("reference-id-list.txt")) : List.of();
         for (int i = 0; i < lines.size(); i++) {
             String prompt = lines.get(i);
             Integer n = PromptTags.leadingNumber(prompt);
@@ -100,16 +123,17 @@ public class OmniImportService {
             String id;
             if (kind == PromptKind.VIDEO) {
                 id = String.valueOf(order);
-            } else if (name.toLowerCase(Locale.ROOT).contains("panel")) {
+            } else if (panel) {
                 id = "PANEL-" + order;
-            } else if (i < idList.size()) {
-                id = idList.get(i);
             } else {
-                throw new IllegalArgumentException(name + " dòng " + (i + 1) + ": không biết ID ảnh. Cần file reference-id-list.txt cùng thư mục, hoặc dùng file Excel.");
+                id = idList.get(order);
+                if (id == null) {
+                    throw new IllegalArgumentException(name + " dòng " + (i + 1) + ": reference-id-list.txt không có ID số " + order);
+                }
             }
             rows.add(new Line(order, id, prompt, List.of(), null));
         }
-        return importLines(projectId, kind, name, rows);
+        return rows;
     }
 
     /**
@@ -118,6 +142,10 @@ public class OmniImportService {
      *  - Ảnh: "ID: prompt" hoặc "ID | prompt" (ID kiểu CHAR-CALEB-1); không ghi ID thì tự đặt ANH-1, ANH-2…
      */
     public ImportResult importText(long projectId, PromptKind kind, String text) {
+        return importLines(projectId, kind, "Nhập tay", textLines(projectId, kind, text));
+    }
+
+    List<Line> textLines(long projectId, PromptKind kind, String text) {
         if (text == null || text.isBlank()) {
             throw new IllegalArgumentException("Chưa nhập prompt nào");
         }
@@ -147,10 +175,11 @@ public class OmniImportService {
                 }
                 rows.add(new Line(order, String.valueOf(order), line, List.of(), null));
             } else {
-                java.util.regex.Matcher m = Pattern.compile("^([A-Za-z0-9][A-Za-z0-9_-]{0,99})\\s*[:|\\t]\\s*(.+)$").matcher(line);
+                // ID kiểu CHAR-CALEB-1 (chữ HOA / số, có gạch nối); "Wide-angle: …" là câu prompt, không phải ID
+                java.util.regex.Matcher m = MANUAL_ID.matcher(line);
                 String id;
                 String prompt;
-                if (m.matches() && m.group(1).contains("-")) {
+                if (m.matches()) {
                     id = m.group(1);
                     prompt = m.group(2).trim();
                 } else {
@@ -163,7 +192,7 @@ public class OmniImportService {
                 rows.add(new Line(next++, id, prompt, List.of(), null));
             }
         }
-        return importLines(projectId, kind, "Nhập tay", rows);
+        return rows;
     }
 
     /**
@@ -182,7 +211,9 @@ public class OmniImportService {
         try (java.util.stream.Stream<Path> s = Files.list(dir)) {
             List<Path> files = s.filter(Files::isRegularFile).sorted().toList();
             xlsx = files.stream().filter(p -> lower(p).endsWith(".xlsx") && !p.getFileName().toString().startsWith("~$")).toList();
-            txt = files.stream().filter(p -> lower(p).endsWith(".txt")).toList();
+            // .txt chỉ nhận đúng các tên Omni quen thuộc (ghi chú, kịch bản .txt khác không phải prompt)
+            txt = files.stream().filter(p -> ProjectFolderScanner.PROMPT_FILES.contains(lower(p)))
+                    .sorted(Comparator.comparing((Path p) -> lower(p).contains("reference") ? 0 : 1).thenComparing(Path::toString)).toList();
         }
         List<Path> imageXlsx = new ArrayList<>();
         List<Path> videoXlsx = new ArrayList<>();
@@ -196,6 +227,8 @@ public class OmniImportService {
         // ảnh gốc trước ảnh panel: panel được tạo từ ảnh gốc
         imageXlsx.sort(Comparator.comparing((Path p) -> lower(p).contains("reference") ? 0 : 1).thenComparing(Path::toString));
 
+        // lấy trước khi nạp prompt: prompt đổi thì job về hàng đợi, nhưng file cũ của nó vẫn không phải "ảnh có sẵn"
+        Set<Path> generated = assetService.generatedFiles(projectId);
         List<ImportResult> results = new ArrayList<>();
         for (Path p : imageXlsx) {
             try (InputStream in = Files.newInputStream(p)) {
@@ -204,8 +237,7 @@ public class OmniImportService {
         }
         if (imageXlsx.isEmpty()) {
             for (Path p : txt) {
-                String n = lower(p);
-                if (n.contains("reference-prompts") || n.contains("prompt-anh-panel")) {
+                if (!lower(p).contains("video")) {
                     results.add(importTxt(projectId, PromptKind.IMAGE, p));
                 }
             }
@@ -223,9 +255,9 @@ public class OmniImportService {
             }
         }
         if (results.isEmpty()) {
-            throw new IllegalArgumentException("Không thấy file prompt nào (Excel .xlsx hoặc .txt của Omni) trong " + dir);
+            throw new NoPromptFileException("Không thấy file prompt nào (Excel .xlsx hoặc .txt của Omni) trong " + dir);
         }
-        AssetService.FolderImportResult a = assetService.importFolder(projectId, folder);
+        AssetService.FolderImportResult a = assetService.importFolder(projectId, folder, generated);
         return new FolderResult(results, a, skipped);
     }
 
@@ -250,9 +282,15 @@ public class OmniImportService {
         if (groups.isEmpty()) {
             throw new IllegalArgumentException(folder + " không có thư mục con nào (mỗi thư mục con = một nhóm ảnh)");
         }
+        String sourceName = "Ảnh→Video: " + root.getFileName();
+        // chạy lại cùng thư mục: dùng lại STT các cảnh đã nạp từ thư mục này (theo thứ tự), không nhân đôi cảnh
+        Iterator<Integer> reuse = prompts.findByProjectId(projectId).stream()
+                .filter(p -> p.getKind() == PromptKind.VIDEO && sourceName.equals(p.getSourceName()))
+                .map(PromptEntity::getSeqNo).sorted().iterator();
         int next = maxSeq(projectId, PromptKind.VIDEO) + 1;
         List<Line> rows = new ArrayList<>();
         List<String> problems = new ArrayList<>();
+        Set<String> usedIds = new HashSet<>();
         for (Path g : groups) {
             String groupName = g.getFileName().toString();
             List<Path> images;
@@ -267,20 +305,24 @@ public class OmniImportService {
             }
             List<String> ids = new ArrayList<>();
             for (Path img : images) {
-                String id = AssetService.sanitizeId(groupName + "-" + AssetService.baseName(img));
+                String base = AssetService.sanitizeId(groupName + "-" + AssetService.baseName(img));
+                String id = base;
+                for (int k = 2; !usedIds.add(id); k++) {
+                    id = base + "-" + k;   // 1.png + 1.jpg (hay tên làm sạch trùng nhau): không ghi đè nhau
+                }
                 Path target = assetService.copyIntoImageDir(project, img, id);
                 assetService.upsert(projectId, id, target, ProjectAssetEntity.SOURCE_USER);
                 ids.add(id);
             }
             String note = "Ảnh → Video: " + groupName;
             if (grouped) {
-                rows.add(new Line(next, String.valueOf(next), groupPrompts.get(0), ids, note));
-                next++;
+                int order = reuse.hasNext() ? reuse.next() : next++;
+                rows.add(new Line(order, String.valueOf(order), groupPrompts.get(0), ids, note));
             } else {
                 for (int i = 0; i < ids.size(); i++) {
                     String prompt = groupPrompts.size() == 1 ? groupPrompts.get(0) : groupPrompts.get(Math.min(i, groupPrompts.size() - 1));
-                    rows.add(new Line(next, String.valueOf(next), prompt, List.of(ids.get(i)), note + " / " + images.get(i).getFileName()));
-                    next++;
+                    int order = reuse.hasNext() ? reuse.next() : next++;
+                    rows.add(new Line(order, String.valueOf(order), prompt, List.of(ids.get(i)), note + " / " + images.get(i).getFileName()));
                 }
             }
         }
@@ -290,7 +332,7 @@ public class OmniImportService {
         if (!problems.isEmpty()) {
             log.warn("Ảnh → Video {}: bỏ qua {} nhóm: {}", folder, problems.size(), problems);
         }
-        return importLines(projectId, PromptKind.VIDEO, "Ảnh→Video: " + root.getFileName(), rows);
+        return importLines(projectId, PromptKind.VIDEO, sourceName, rows);
     }
 
     private static List<String> readGroupPrompts(Path group, String name) throws IOException {
@@ -409,13 +451,23 @@ public class OmniImportService {
         }
     }
 
-    private static List<String> readIdList(Path p) throws IOException {
+    /** reference-id-list.txt: "12. CHAR-A-1" → 12 → CHAR-A-1; dòng không ghi số thì lấy số dòng. */
+    private static Map<Integer, String> readIdList(Path p) throws IOException {
+        Map<Integer, String> out = new LinkedHashMap<>();
         if (!Files.isRegularFile(p)) {
-            return List.of();
+            return out;
         }
-        return Files.readAllLines(p, java.nio.charset.StandardCharsets.UTF_8).stream()
-                .map(s -> s.replace("\uFEFF", "").trim()).filter(s -> !s.isEmpty())
-                .map(s -> s.replaceFirst("^\\d+\\.\\s*", "")).toList();
+        List<String> lines = Files.readAllLines(p, java.nio.charset.StandardCharsets.UTF_8).stream()
+                .map(s -> s.replace("\uFEFF", "").trim()).filter(s -> !s.isEmpty()).toList();
+        for (int i = 0; i < lines.size(); i++) {
+            java.util.regex.Matcher m = Pattern.compile("^(\\d+)[.)]\\s*(.+)$").matcher(lines.get(i));
+            if (m.matches()) {
+                out.put(Integer.parseInt(m.group(1)), m.group(2).trim());
+            } else {
+                out.put(i + 1, lines.get(i));
+            }
+        }
+        return out;
     }
 
     private static String lower(Path p) {
@@ -466,29 +518,46 @@ public class OmniImportService {
         }
 
         fill(prompt, r, fileName, sourceOrder);
+        List<String> oldRefs = references.findByVideoPromptIdOrderByOrdinalAsc(prompt.getId()).stream()
+                .filter(x -> !x.isUserAdded()).map(PromptReferenceEntity::getRefExternalId).toList();
         saveRefs(prompt, r.refs());
+        boolean refsChanged = !oldRefs.equals(r.refs().stream().distinct().toList());
         // So với bản IMPORT gần nhất (không phải bản hiện tại): nguồn không đổi thì giữ nguyên chỗ người dùng đã sửa tay.
         String lastImported = revisions.findFirstByPromptIdAndSourceOrderByRevisionNoDesc(prompt.getId(), PromptRevisionEntity.SOURCE_IMPORT)
                 .map(PromptRevisionEntity::getPromptText).orElse("");
-        if (lastImported.equals(r.prompt())) {
+        boolean textChanged = !lastImported.equals(r.prompt());
+        if (!textChanged && !refsChanged) {
             counts[2]++;
             return;
         }
-        int nextNo = revisions.maxRevisionNo(prompt.getId()) + 1;
-        PromptRevisionEntity rev = revisions.save(new PromptRevisionEntity(prompt.getId(), nextNo, r.prompt(),
-                PromptRevisionEntity.SOURCE_IMPORT, "import lại " + fileName + ": prompt đổi"));
-        prompt.setCurrentRevisionId(rev.getId());
+        if (textChanged) {
+            int nextNo = revisions.maxRevisionNo(prompt.getId()) + 1;
+            PromptRevisionEntity rev = revisions.save(new PromptRevisionEntity(prompt.getId(), nextNo, r.prompt(),
+                    PromptRevisionEntity.SOURCE_IMPORT, "import lại " + fileName + ": prompt đổi"));
+            prompt.setCurrentRevisionId(rev.getId());
+        }
         counts[1]++;
 
-        // Prompt đổi ở nguồn: kết quả cũ không còn khớp, đưa job về hàng đợi (trừ job đang chạy)
+        // Prompt / ảnh reference đổi ở nguồn: kết quả cũ không còn khớp, đưa job về hàng đợi (trừ job đang chạy)
         JobEntity job = jobs.findByPromptId(prompt.getId()).orElseThrow();
-        if (job.getStatus() != JobStatus.PENDING && job.getStatus() != JobStatus.GENERATING && job.getStatus().canMoveTo(JobStatus.PENDING)) {
-            job.setPreviewPath(null);
-            job.setAttempt(0);
-            job.setAccountId(null);
-            transitions.move(job, JobStatus.PENDING, null, "import lại: prompt đổi ở nguồn");
-            counts[3]++;
+        if (job.getStatus() == JobStatus.PENDING || job.getStatus() == JobStatus.GENERATING || !job.getStatus().canMoveTo(JobStatus.PENDING)) {
+            return;
         }
+        Optional<ProjectAssetEntity> asset = assets.findByProjectIdAndExternalId(project.getId(), extId);
+        if (kind == PromptKind.IMAGE && asset.map(a -> ProjectAssetEntity.SOURCE_USER.equals(a.getSource())).orElse(false)) {
+            return;   // ảnh này người dùng đã đưa vào: không tạo lại (như "Thử lại hàng loạt")
+        }
+        if (kind == PromptKind.IMAGE) {
+            asset.ifPresent(assets::delete);   // ảnh đã duyệt theo prompt cũ: rút khỏi kho, cảnh dùng nó chờ ảnh mới
+        }
+        job.setPreviewPath(null);
+        job.setFinalPath(null);
+        job.setAttempt(0);
+        job.setAccountId(null);
+        job.setErrorCode(null);
+        job.setErrorMessage(null);
+        transitions.move(job, JobStatus.PENDING, null, textChanged ? "import lại: prompt đổi ở nguồn" : "import lại: ảnh reference đổi ở nguồn");
+        counts[3]++;
     }
 
     private static void fill(PromptEntity p, Line r, String fileName, int sourceOrder) {
@@ -543,7 +612,7 @@ public class OmniImportService {
         }
     }
 
-    private List<Line> readImages(InputStream in, String fileName) throws IOException {
+    List<Line> readImages(InputStream in, String fileName) throws IOException {
         List<Line> out = new ArrayList<>();
         readSheet(in, fileName, (h, row, f, index) -> {
             Integer idCol = pick(h, IMAGE_ID_COLS);
@@ -590,7 +659,7 @@ public class OmniImportService {
         return out;
     }
 
-    private static List<String> refsOf(Row row, Map<String, Integer> h, DataFormatter f) {
+    private static List<String> refsOf(Row row, Map<String, Integer> h, Cells f) {
         Integer col = pick(h, REFS_COLS);
         List<String> refs = new ArrayList<>();
         if (col != null) {
@@ -603,7 +672,7 @@ public class OmniImportService {
         return refs;
     }
 
-    private static String noteOf(Row row, Map<String, Integer> h, DataFormatter f) {
+    private static String noteOf(Row row, Map<String, Integer> h, Cells f) {
         Integer col = pick(h, NOTE_COLS);
         String note = col == null ? "" : text(row, col, f);
         return note.isEmpty() ? null : note;
@@ -615,12 +684,20 @@ public class OmniImportService {
     }
 
     interface RowHandler {
-        void handle(Map<String, Integer> header, Row row, DataFormatter f, int index);
+        void handle(Map<String, Integer> header, Row row, Cells f, int index);
+    }
+
+    /** Đọc ô thành chữ; ô công thức lấy giá trị đã tính. */
+    record Cells(DataFormatter f, FormulaEvaluator evaluator) {
+        String text(Row row, int col) {
+            Cell c = row.getCell(col);
+            return c == null ? "" : f.formatCellValue(c, evaluator).trim();
+        }
     }
 
     private static void readSheet(InputStream in, String fileName, RowHandler handler) throws IOException {
-        DataFormatter f = new DataFormatter();
         try (Workbook wb = WorkbookFactory.create(in)) {
+            Cells f = new Cells(new DataFormatter(), wb.getCreationHelper().createFormulaEvaluator());
             Sheet sheet = wb.getSheetAt(0);
             Row headerRow = sheet.getRow(0);
             if (headerRow == null) {
@@ -628,7 +705,7 @@ public class OmniImportService {
             }
             Map<String, Integer> header = new LinkedHashMap<>();
             for (Cell c : headerRow) {
-                String name = f.formatCellValue(c).trim();
+                String name = f.f().formatCellValue(c).trim();
                 if (!name.isEmpty()) {
                     header.putIfAbsent(name, c.getColumnIndex());
                 }
@@ -654,9 +731,8 @@ public class OmniImportService {
         return null;
     }
 
-    private static String text(Row row, int col, DataFormatter f) {
-        Cell c = row.getCell(col);
-        return c == null ? "" : f.formatCellValue(c).trim();
+    private static String text(Row row, int col, Cells f) {
+        return f.text(row, col);
     }
 
     private static int intOf(String s, Row row, String fileName) {

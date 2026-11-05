@@ -77,8 +77,9 @@ public class ProjectController {
 
     /** "Thêm file ảnh" (kind=IMAGE) / "Thêm file video" (kind=VIDEO): tải một file .xlsx hoặc .txt (mỗi dòng 1 prompt) lên. */
     @PostMapping(value = "/{id}/import-file", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ImportResult importFile(@PathVariable long id, @RequestParam PromptKind kind,
+    public ImportResult importFile(@PathVariable long id, @RequestParam("kind") String kindName,
                                    @RequestParam("file") MultipartFile file) throws IOException {
+        PromptKind kind = kindOf(kindName);
         String name = file.getOriginalFilename() == null ? "upload.xlsx" : Path.of(file.getOriginalFilename()).getFileName().toString();
         String lower = name.toLowerCase(Locale.ROOT);
         if (lower.endsWith(".txt")) {
@@ -103,20 +104,39 @@ public class ProjectController {
 
     /** "Nạp cả thư mục phim": mọi file prompt (.xlsx / .txt) + ảnh có sẵn trong một thư mục, ví dụ D:\Dev\Tập 5. Hà - Cupid. */
     @PostMapping("/{id}/import-folder")
-    public OmniImportService.FolderResult importMovieFolder(@PathVariable long id, @RequestBody Map<String, String> body) throws IOException {
-        return importer.importFolder(id, body.get("path"));
+    public OmniImportService.FolderResult importMovieFolder(@PathVariable long id, @RequestBody(required = false) Map<String, Object> body) throws IOException {
+        return importer.importFolder(id, pathOf(body));
     }
 
     /** "Nhập thủ công": dán prompt, mỗi dòng một cảnh. */
     @PostMapping("/{id}/import-text")
-    public ImportResult importText(@PathVariable long id, @RequestBody Map<String, String> body) {
-        return importer.importText(id, PromptKind.valueOf(body.getOrDefault("kind", "VIDEO")), body.get("text"));
+    public ImportResult importText(@PathVariable long id, @RequestBody(required = false) Map<String, Object> body) {
+        Object kind = body == null ? null : body.get("kind");
+        return importer.importText(id, kindOf(kind == null ? "VIDEO" : kind.toString()),
+                body == null || body.get("text") == null ? null : body.get("text").toString());
     }
 
     /** "Ảnh → Video theo thư mục con". */
     @PostMapping("/{id}/import-image-groups")
-    public ImportResult importImageGroups(@PathVariable long id, @RequestBody Map<String, Object> body) throws IOException {
-        return importer.importImageGroups(id, String.valueOf(body.get("path")), Boolean.TRUE.equals(body.get("grouped")));
+    public ImportResult importImageGroups(@PathVariable long id, @RequestBody(required = false) Map<String, Object> body) throws IOException {
+        return importer.importImageGroups(id, pathOf(body), Boolean.TRUE.equals(body.get("grouped")));
+    }
+
+    /** Body JSON {"path": "..."}: thiếu / rỗng thì báo tiếng Việt (400) thay vì lỗi hệ thống. */
+    static String pathOf(Map<String, Object> body) {
+        Object p = body == null ? null : body.get("path");
+        if (p == null || p.toString().isBlank()) {
+            throw new IllegalArgumentException("Chưa chọn thư mục");
+        }
+        return p.toString().trim();
+    }
+
+    static PromptKind kindOf(String kind) {
+        try {
+            return PromptKind.valueOf(kind == null ? "" : kind.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Loại prompt phải là IMAGE (ảnh) hoặc VIDEO, không phải \"" + kind + "\"");
+        }
     }
 
     @PostMapping("/{id}/start")
@@ -149,8 +169,8 @@ public class ProjectController {
 
     /** "Thêm ảnh có sẵn": thư mục chứa ảnh gốc đặt tên theo ID (CHAR-CALEB-1.png, LOC-1.jpg…). */
     @PostMapping("/{id}/assets/import-folder")
-    public FolderImportResult importFolder(@PathVariable long id, @RequestBody Map<String, String> body) {
-        return assetService.importFolder(id, body.get("path"));
+    public FolderImportResult importFolder(@PathVariable long id, @RequestBody(required = false) Map<String, Object> body) {
+        return assetService.importFolder(id, pathOf(body));
     }
 
     /** Ảnh của một ID (để xem thu nhỏ / so sánh với prompt). */

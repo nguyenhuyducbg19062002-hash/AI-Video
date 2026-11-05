@@ -60,12 +60,13 @@ public class ProjectService {
 
     @Transactional
     public ProjectView create(ProjectForm f) {
-        ProjectEntity p = new ProjectEntity();
-        apply(p, f);
+        require(f.name(), "Tên phim");
         String code = f.code() == null || f.code().isBlank() ? slug(f.name()) : slug(f.code());
         if (projects.findByCode(code).isPresent()) {
             throw new IllegalArgumentException("Mã phim \"" + code + "\" đã tồn tại");
         }
+        ProjectEntity p = new ProjectEntity();
+        apply(p, f);   // kiểm trùng mã xong mới tạo thư mục
         p.setCode(code);
         return view(projects.save(p));
     }
@@ -87,28 +88,34 @@ public class ProjectService {
                 srcDir = Path.of(src).toAbsolutePath().normalize();
                 try {
                     notes.addAll(AutoImportSummary.lines(importer.importFolder(id, src)));
-                } catch (IllegalArgumentException e) {
+                } catch (OmniImportService.NoPromptFileException e) {
                     // thư mục chưa có file prompt nào: không phải lỗi, chỉ là chưa có gì để nạp
-                    if (e.getMessage() == null || !e.getMessage().startsWith("Không thấy file prompt")) {
-                        notes.add("Không nạp tự động được: " + e.getMessage());
-                    }
+                } catch (IllegalArgumentException e) {
+                    notes.add("Không nạp tự động được: " + e.getMessage());
                 }
             }
             Path img = Path.of(p.getImageDir()).toAbsolutePath().normalize();
-            boolean insideSource = srcDir != null && img.startsWith(srcDir);
-            if (!insideSource && Files.isDirectory(img) && !prompts.findByProjectId(id).isEmpty()) {
+            if (!scannedWith(srcDir, img) && Files.isDirectory(img) && !prompts.findByProjectId(id).isEmpty()) {
                 var a = assetService.importFolder(id, img.toString());
                 int n = a.added() + a.replaced();
                 if (n > 0) {
                     notes.add("✓ " + n + " ảnh có sẵn trong Folder Ảnh đã gán vào phim"
                             + (a.skippedJobs() > 0 ? " (" + a.skippedJobs() + " ảnh khỏi phải tạo)" : ""));
                 }
+                notes.addAll(AutoImportSummary.warnings(a));
             }
         } catch (Exception e) {
             log.warn("Tự nạp phim {} lỗi: {}", p.getCode(), e.toString());
             notes.add("Không nạp tự động được (" + e.getMessage() + "): bấm \"Import prompt\" để thử lại.");
         }
-        return view(projects.findById(id).orElseThrow()).withAutoImport(notes);
+        ProjectView v = view(projects.findById(id).orElseThrow());
+        AutoImportSummary.missing(v.missingRefs()).ifPresent(notes::add);
+        return v.withAutoImport(notes);
+    }
+
+    /** Folder Ảnh đã được quét chung khi nạp thư mục Omni (nằm trong đó và không thuộc thư mục phụ "_…" / ".…" bị bỏ qua). */
+    static boolean scannedWith(Path srcDir, Path img) {
+        return srcDir != null && img.startsWith(srcDir) && !AssetService.sideFolder(srcDir.relativize(img));
     }
 
     @Transactional
@@ -139,11 +146,19 @@ public class ProjectService {
      */
     @Transactional
     public VerifyResult verifyFiles(long id) {
+        ProjectEntity p = projects.findById(id).orElseThrow();
         int checked = 0, missing = 0, broken = 0;
         List<String> details = new ArrayList<>();
         for (JobEntity j : jobs.findByProjectIdAndStatus(id, JobStatus.SUCCESS)) {
             checked++;
-            Path file = j.getFinalPath() == null ? null : Path.of(j.getFinalPath());
+            Path file = j.getFinalPath() == null ? null
+                    : relocate(Path.of(j.getFinalPath()), j.getKind() == PromptKind.IMAGE ? p.getImageDir() : p.getVideoDir());
+            if (file != null && !file.toString().equals(j.getFinalPath())) {
+                j.setFinalPath(file.toString());
+                if (j.getKind() == PromptKind.IMAGE) {
+                    approvedAsset(id, j).ifPresent(a -> a.setFilePath(file.toString()));
+                }
+            }
             Optional<String> problem = MediaCheck.problem(file);
             if (problem.isEmpty()) {
                 continue;
@@ -161,9 +176,7 @@ public class ProjectService {
             transitions.move(j, JobStatus.PENDING, null, "kiểm tra file: " + problem.get() + " → tạo lại");
             if (j.getKind() == PromptKind.IMAGE) {
                 // rút ảnh khỏi kho: panel / video dùng ảnh này chờ ảnh mới
-                prompts.findById(j.getPromptId()).flatMap(pr -> assets.findByProjectIdAndExternalId(id, pr.getExternalId()))
-                        .filter(a -> ProjectAssetEntity.SOURCE_APPROVED.equals(a.getSource()))
-                        .ifPresent(assets::delete);
+                approvedAsset(id, j).ifPresent(assets::delete);
             }
         }
         int requeued = missing + broken;
@@ -173,9 +186,13 @@ public class ProjectService {
                 continue;
             }
             checked++;
-            Optional<String> problem = MediaCheck.problem(Path.of(a.getFilePath()));
+            Path file = relocate(Path.of(a.getFilePath()), p.getImageDir());
+            if (!file.toString().equals(a.getFilePath())) {
+                a.setFilePath(file.toString());
+            }
+            Optional<String> problem = MediaCheck.problem(file);
             if (problem.isPresent()) {
-                if (Files.exists(Path.of(a.getFilePath()))) broken++; else missing++;
+                if (Files.exists(file)) broken++; else missing++;
                 details.add(a.getExternalId() + " (ảnh có sẵn): " + problem.get() + " → cần thêm lại");
                 assets.delete(a);
             }
@@ -184,6 +201,33 @@ public class ProjectService {
             log.warn("Phim {}: {} file mất, {} file hỏng", id, missing, broken);
         }
         return new VerifyResult(checked, missing, broken, requeued, details.subList(0, Math.min(details.size(), 20)));
+    }
+
+    private Optional<ProjectAssetEntity> approvedAsset(long projectId, JobEntity j) {
+        return prompts.findById(j.getPromptId()).flatMap(pr -> assets.findByProjectIdAndExternalId(projectId, pr.getExternalId()))
+                .filter(a -> ProjectAssetEntity.SOURCE_APPROVED.equals(a.getSource()));
+    }
+
+    /**
+     * File không còn ở đường dẫn cũ (thư mục phim đã dời đi chỗ khác): tìm file cùng tên trong thư mục hiện tại của phim,
+     * kể cả thư mục con (như JobPayloadFactory.locate). Không thấy thì trả về đường dẫn cũ.
+     */
+    static Path relocate(Path file, String dir) {
+        if (Files.isRegularFile(file) || dir == null || dir.isBlank() || !Files.isDirectory(Path.of(dir))) {
+            return file;
+        }
+        String name = file.getFileName().toString();
+        Path direct = Path.of(dir).resolve(name);
+        if (Files.isRegularFile(direct)) {
+            return direct;
+        }
+        try (java.util.stream.Stream<Path> walk = Files.walk(Path.of(dir), 3)) {
+            return walk.filter(Files::isRegularFile)
+                    .filter(f -> f.getFileName().toString().equalsIgnoreCase(name))
+                    .findFirst().orElse(file);
+        } catch (java.io.IOException e) {
+            return file;
+        }
     }
 
     /** Quét định kỳ các phim đang chạy (người dùng có thể xóa/ghi đè file trong folder bất cứ lúc nào). */

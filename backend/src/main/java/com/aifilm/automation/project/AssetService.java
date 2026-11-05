@@ -9,6 +9,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -35,10 +36,13 @@ public class AssetService {
     private final PromptReferenceRepository references;
     private final JobRepository jobs;
     private final JobTransitions transitions;
+    private final TransactionTemplate tx;
 
     public record AssetView(String externalId, String source, String fileName) {}
 
-    public record FolderImportResult(int added, int replaced, int notReferenced, int skippedJobs, List<String> notReferencedNames) {}
+    /** warnings: file bị bỏ qua (trùng ID với file khác, ảnh hỏng / rỗng). */
+    public record FolderImportResult(int added, int replaced, int notReferenced, int skippedJobs, List<String> notReferencedNames,
+                                     List<String> warnings) {}
 
     /**
      * Các file ảnh trong thư mục (cả thư mục con), BỎ QUA mọi thư mục con bắt đầu bằng "_" hoặc ".": đó là thư mục cất riêng
@@ -49,16 +53,20 @@ public class AssetService {
         try (Stream<Path> walk = Files.walk(src)) {
             return walk.filter(Files::isRegularFile)
                     .filter(f -> IMAGE_EXT.contains(ext(f)))
-                    .filter(f -> !inSideFolder(src.relativize(f)))
+                    .filter(f -> !sideFolder(src.relativize(f).getParent()))
                     .sorted().toList();
         } catch (IOException e) {
             throw new UncheckedIOException("Không đọc được thư mục " + src, e);
         }
     }
 
-    private static boolean inSideFolder(Path relative) {
-        for (int i = 0; i < relative.getNameCount() - 1; i++) {
-            String n = relative.getName(i).toString();
+    /** Thư mục (đường dẫn tương đối so với thư mục được quét) có cấp nào bắt đầu bằng "_" hoặc "." không. */
+    static boolean sideFolder(Path relativeDir) {
+        if (relativeDir == null) {
+            return false;
+        }
+        for (Path part : relativeDir) {
+            String n = part.toString();
             if (n.startsWith("_") || n.startsWith(".")) {
                 return true;
             }
@@ -101,48 +109,99 @@ public class AssetService {
 
     /**
      * "Thêm ảnh có sẵn": quét một thư mục (cả thư mục con), lấy ảnh có tên file trùng một Reference ID mà phim cần
-     * (ví dụ CHAR-CALEB-1.png), chép vào Folder Ảnh và ghi vào kho. Ảnh có sẵn cho một ID mà app định tạo thì job
-     * tạo ảnh đó được hủy (không tốn lượt tạo).
+     * (ví dụ CHAR-CALEB-1.png, không phân biệt hoa thường), chép vào Folder Ảnh và ghi vào kho. Ảnh có sẵn cho một ID
+     * mà app định tạo thì job tạo ảnh đó được hủy (không tốn lượt tạo).
+     * Cùng một ID có ở nhiều thư mục: ưu tiên file đã nằm trong Folder Ảnh, các file còn lại bỏ qua và báo lại.
+     * Chép file ngoài transaction; chỉ ghi DB trong một transaction ngắn.
      */
-    @Transactional
     public FolderImportResult importFolder(long projectId, String folder) {
+        return importFolder(projectId, folder, generatedFiles(projectId));
+    }
+
+    /**
+     * File do app tạo ra (kết quả đã duyệt của job ảnh, ảnh APPROVED trong kho): quét thấy thì KHÔNG coi là ảnh người dùng
+     * đưa vào, không đổi nhãn trong kho, không hủy job. Lấy TRƯỚC khi nạp lại prompt (nạp lại có thể đưa job về hàng đợi).
+     */
+    Set<Path> generatedFiles(long projectId) {
+        Set<Path> out = new HashSet<>();
+        for (JobEntity j : jobs.findByProjectId(projectId)) {
+            if (j.getKind() == PromptKind.IMAGE && j.getFinalPath() != null) {
+                out.add(Path.of(j.getFinalPath()).toAbsolutePath().normalize());
+            }
+        }
+        for (ProjectAssetEntity a : assets.findByProjectId(projectId)) {
+            if (ProjectAssetEntity.SOURCE_APPROVED.equals(a.getSource())) {
+                out.add(Path.of(a.getFilePath()).toAbsolutePath().normalize());
+            }
+        }
+        return out;
+    }
+
+    FolderImportResult importFolder(long projectId, String folder, Set<Path> generated) {
         ProjectEntity p = projects.findById(projectId).orElseThrow();
         Path src = Path.of(folder);
         if (!Files.isDirectory(src)) {
             throw new IllegalArgumentException("Thư mục không tồn tại: " + folder);
         }
-        Set<String> wanted = new HashSet<>(references.findDistinctRefIds(projectId));
+        Map<String, String> wanted = new HashMap<>();   // tên thường → ID đúng
         Map<String, PromptEntity> imagePrompts = new HashMap<>();
         for (PromptEntity pr : prompts.findByProjectId(projectId)) {
             if (pr.getKind() == PromptKind.IMAGE) {
                 imagePrompts.put(pr.getExternalId(), pr);
+                wanted.putIfAbsent(pr.getExternalId().toLowerCase(Locale.ROOT), pr.getExternalId());
             }
         }
-        int added = 0, replaced = 0, skippedJobs = 0;
+        references.findDistinctRefIds(projectId).forEach(id -> wanted.putIfAbsent(id.toLowerCase(Locale.ROOT), id));
+        Path imageDir = Path.of(p.getImageDir()).toAbsolutePath().normalize();
         List<String> notReferenced = new ArrayList<>();
-        List<Path> files = imageFiles(src);
+        List<String> warnings = new ArrayList<>();
+        Map<String, Path> picked = new LinkedHashMap<>();   // ID → file được chọn
+        Map<String, Path> copied = new LinkedHashMap<>();   // ID → file trong Folder Ảnh
+        List<Path> files = new ArrayList<>(imageFiles(src));
+        // file đã nằm ngay trong Folder Ảnh đứng trước: trùng ID thì nó được giữ
+        files.sort(Comparator.comparing((Path f) -> imageDir.equals(f.toAbsolutePath().normalize().getParent()) ? 0 : 1)
+                .thenComparing(Comparator.naturalOrder()));
         for (Path f : files) {
-            String id = baseName(f);
-            if (!wanted.contains(id) && !imagePrompts.containsKey(id)) {
+            String id = wanted.get(baseName(f).toLowerCase(Locale.ROOT));
+            if (id == null) {
                 notReferenced.add(f.getFileName().toString());
                 continue;
             }
-            boolean existed = assets.findByProjectIdAndExternalId(projectId, id).isPresent();
-            Path target = copyIntoImageDir(p, f, id);
-            upsert(projectId, id, target, ProjectAssetEntity.SOURCE_USER);
-            if (existed) replaced++; else added++;
-            PromptEntity pr = imagePrompts.get(id);
-            if (pr != null) {
-                JobEntity job = jobs.findByPromptId(pr.getId()).orElse(null);
+            Path other = picked.get(id);
+            if (other != null) {
+                warnings.add(f + ": trùng ID " + id + " với " + other + ", bỏ qua");
+                continue;
+            }
+            Optional<String> problem = MediaCheck.problem(f);
+            if (problem.isPresent()) {
+                warnings.add(f + ": " + problem.get() + ", bỏ qua");
+                continue;
+            }
+            picked.put(id, f);
+            if (generated.contains(f.toAbsolutePath().normalize())) {
+                continue;   // kết quả app đã tạo, không phải ảnh có sẵn
+            }
+            copied.put(id, copyIntoImageDir(p, f, id));
+        }
+        int[] counts = tx.execute(status -> {
+            int added = 0, replaced = 0, skippedJobs = 0;
+            for (Map.Entry<String, Path> e : copied.entrySet()) {
+                String id = e.getKey();
+                if (assets.findByProjectIdAndExternalId(projectId, id).isPresent()) replaced++; else added++;
+                upsert(projectId, id, e.getValue(), ProjectAssetEntity.SOURCE_USER);
+                PromptEntity pr = imagePrompts.get(id);
+                JobEntity job = pr == null ? null : jobs.findByPromptId(pr.getId()).orElse(null);
                 if (job != null && (job.getStatus() == JobStatus.PENDING || job.getStatus() == JobStatus.FAILED)) {
-                    transitions.move(job, JobStatus.CANCELLED, null, "đã có ảnh có sẵn " + f.getFileName() + ", không cần tạo");
+                    transitions.move(job, JobStatus.CANCELLED, null, "đã có ảnh có sẵn " + e.getValue().getFileName() + ", không cần tạo");
                     skippedJobs++;
                 }
             }
-        }
-        log.info("Phim {}: thêm {} ảnh có sẵn (thay {}), bỏ qua {} file không thuộc phim", projectId, added, replaced, notReferenced.size());
-        return new FolderImportResult(added, replaced, notReferenced.size(), skippedJobs,
-                notReferenced.subList(0, Math.min(notReferenced.size(), 20)));
+            return new int[]{added, replaced, skippedJobs};
+        });
+        log.info("Phim {}: thêm {} ảnh có sẵn (thay {}), bỏ qua {} file không thuộc phim, {} cảnh báo",
+                projectId, counts[0], counts[1], notReferenced.size(), warnings.size());
+        return new FolderImportResult(counts[0], counts[1], notReferenced.size(), counts[2],
+                notReferenced.subList(0, Math.min(notReferenced.size(), 20)), warnings.subList(0, Math.min(warnings.size(), 20)));
     }
 
     /**
