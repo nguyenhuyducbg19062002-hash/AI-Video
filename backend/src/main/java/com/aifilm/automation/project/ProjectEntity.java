@@ -97,6 +97,9 @@ public class ProjectEntity {
     /** Chất lượng khi tải video về: 480p | 720p | 1080p. null = 720p. */
     private String videoQuality;
 
+    /** Seedance: tạo kèm âm thanh (Playground "sound"). null = bật. */
+    private Boolean generateAudio;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private ProjectStatus status = ProjectStatus.DRAFT;

@@ -78,10 +78,14 @@
             <label class="label">Nền tảng</label>
             <select v-model="form.provider" class="input">
               <option value="FLOW_BROWSER">Google Flow (trình duyệt Edge)</option>
+              <option value="GOOGLE_AI_STUDIO">Google AI Studio (API key)</option>
               <option value="VERTEX_API">Vertex AI API (Imagen / Veo)</option>
+              <option value="SEEDANCE_API">Seedance qua ModelArk (API key)</option>
               <option value="FAKE">Chạy thử (không gọi nền tảng nào)</option>
             </select>
-            <p class="hint">Prompt Omni dùng tới 7 ảnh reference: nên dùng Google Flow.</p>
+            <p v-if="form.provider === 'GOOGLE_AI_STUDIO'" class="hint">Google AI Studio: tạo ảnh (Imagen 3) và video (Veo 2) qua API chính thức từ aistudio.google.com bằng API key. Chế độ chạy: chạy nền.</p>
+            <p v-else-if="form.provider === 'SEEDANCE_API'" class="hint">Seedance tự gửi prompt kèm tới 9 ảnh tham chiếu và tự tải video về. Cần tài khoản Seedance (API key) ở màn Tài khoản; chế độ chạy phải là chạy nền.</p>
+            <p v-else class="hint">Prompt Omni dùng tới 7 ảnh reference: nên dùng Google Flow.</p>
           </div>
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
@@ -96,6 +100,8 @@
               <label class="label">Tỉ lệ</label>
               <select v-model="form.aspectRatio" class="input">
                 <option>16:9</option><option>9:16</option><option>1:1</option>
+                <template v-if="isSeedance"><option>4:3</option><option>3:4</option><option>21:9</option>
+                  <option value="adaptive">Smart (tự theo ảnh)</option></template>
               </select>
             </div>
           </div>
@@ -106,7 +112,7 @@
             <label class="label">Độ dài video</label>
             <select v-model="form.videoDuration" class="input">
               <option :value="null">Mặc định (theo prompt / nền tảng)</option>
-              <option v-for="s in [4, 5, 6, 8, 10]" :key="s" :value="s">{{ s }} giây</option>
+              <option v-for="s in durations" :key="s" :value="s">{{ s }} giây</option>
             </select>
           </div>
           <div>
@@ -117,6 +123,10 @@
               <option value="1080p">1080p</option>
             </select>
           </div>
+          <label v-if="isSeedance" class="sm:col-span-2 flex items-center gap-2 text-sm text-slate-700">
+            <input v-model="form.generateAudio" type="checkbox" class="rounded border-slate-300 text-indigo-600" />
+            Tạo kèm âm thanh (sound): thoại, tiếng động theo prompt
+          </label>
           <p class="hint col-span-2 -mt-2">Prompt Omni đã ghi sẵn thời lượng mỗi cảnh ("Requested duration: 10 seconds"); chỉ đổi độ dài khi nền tảng cần chọn riêng.</p>
         </div>
       </div>
@@ -130,7 +140,7 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { Film, MonitorPlay, Sparkles, X } from 'lucide-vue-next'
 import FolderInput from './FolderInput.vue'
 import { projectsApi, errMsg } from '@/api'
@@ -147,9 +157,12 @@ const modes = [
 const blank = () => ({
   name: '', sourceDir: '', imageDir: '', videoDir: '', runMode: 'BACKGROUND', provider: 'FLOW_BROWSER',
   aspectRatio: '16:9', maxParallel: 3, maxAttempts: 3, waitAllImages: false,
-  videoDuration: null, videoQuality: '720p', autoApproveImages: false,
+  videoDuration: null, videoQuality: '720p', autoApproveImages: false, generateAudio: true,
 })
 const form = ref(blank())
+const isSeedance = computed(() => form.value.provider === 'SEEDANCE_API')
+// Seedance 2.0: 4–15 giây; Flow / Veo chỉ các mốc ngắn
+const durations = computed(() => isSeedance.value ? [4, 5, 6, 8, 10, 12, 15] : [4, 5, 6, 8, 10])
 const saving = ref(false)
 
 // Thư mục kết quả của Omni-Flash-Pipeline (phim mới): quét sau khi dừng gõ / chọn xong, rồi điền sẵn tên phim, Folder Ảnh,
@@ -205,6 +218,7 @@ watch(() => [props.show, props.project], () => {
   form.value = props.project
     ? { ...blank(), ...props.project, waitAllImages: props.project.waitAllImages !== false,
         videoDuration: props.project.videoDuration ?? null, videoQuality: props.project.videoQuality || '720p',
+        generateAudio: props.project.generateAudio ?? true,
         autoApproveImages: !!props.project.autoApproveImages }
     : blank()
 }, { immediate: true })

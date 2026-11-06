@@ -25,7 +25,8 @@ from playwright.sync_api import Error as PlaywrightError  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
 
 from drivers.errors import PROXY_ERRORS, proxy_error  # noqa: E402
-from drivers.flow_browser import FLOW_URL, parse_proxy  # noqa: E402
+from drivers.flow_browser import FLOW_URL, parse_proxy
+from drivers.stealth import apply_stealth, detect_and_solve_turnstile, get_ignore_default_args, get_stealth_args  # noqa: E402
 
 BADGE_JS = """() => { for (const e of document.querySelectorAll('[aria-label]')) {
     const a = e.getAttribute('aria-label') || ''; if (/@/.test(a) && /google/i.test(a)) return a; } return null; }"""
@@ -39,9 +40,17 @@ def result(state: str, email: str = "", message: str = "") -> None:
 def check(profile: str, proxy: str | None, timeout_s: float = 25.0) -> None:
     with sync_playwright() as pw:
         try:
+            launch_args = ["--disable-background-mode"] + get_stealth_args()
             ctx = pw.chromium.launch_persistent_context(
-                user_data_dir=profile, channel="msedge", headless=True, proxy=parse_proxy(proxy),
-                args=["--disable-background-mode"])
+                user_data_dir=profile,
+                channel="msedge",
+                headless=True,
+                proxy=parse_proxy(proxy),
+                ignore_default_args=get_ignore_default_args(),
+                args=launch_args,
+                chromium_sandbox=True,
+            )
+            apply_stealth(ctx)
         except PlaywrightError as e:
             msg = str(e)
             if "ProcessSingleton" in msg or "already in use" in msg.lower() or "Target page, context or browser has been closed" in msg:
@@ -53,6 +62,7 @@ def check(profile: str, proxy: str | None, timeout_s: float = 25.0) -> None:
             page = ctx.pages[0] if ctx.pages else ctx.new_page()
             page.set_default_timeout(20_000)
             page.goto(FLOW_URL, wait_until="domcontentloaded")
+            detect_and_solve_turnstile(page, timeout_s=3.0)
             deadline = time.monotonic() + timeout_s
             while time.monotonic() < deadline:
                 badge = page.evaluate(BADGE_JS)

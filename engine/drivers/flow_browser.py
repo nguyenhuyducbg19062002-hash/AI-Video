@@ -12,9 +12,11 @@ FOREGROUND: mở Edge có giao diện, tự upload ảnh + gõ prompt có chip @
 
 Selector của Flow nằm trong engine/selectors.json, đọc lại mỗi job: Flow đổi giao diện thì sửa file đó, không cần build lại.
 """
+import atexit
 import json
 import logging
 import os
+import random
 import re
 import time
 import unicodedata
@@ -30,6 +32,8 @@ from .errors import (AccountBroken, AuthRequired, BotSuspected, Cancelled, Confi
                      Rejected, TransientError, proxy_error)
 from .flow_session import SessionRunner, Tile
 from .helper_overlay import open_in_explorer, overlay_script, prepare_refs_folder
+from .stealth import (apply_stealth, detect_and_solve_turnstile, get_ignore_default_args, get_stealth_args,
+                      human_click, human_type, send_prompt)
 
 FLOW_URL = "https://flow.google.com/"
 VIDEO_QUALITIES = ["1080p", "720p", "480p", "360p"]   # từ cao xuống thấp
@@ -225,7 +229,7 @@ class _SessionOps:
         d._apply_settings(page, s, job["kind"], job)
         d._select_mode(page, s, job["kind"])
         uploaded = d._upload_refs(page, s, job["referenceImages"])
-        page.wait_for_timeout(4_000 if uploaded else 300)   # ô ảnh vừa tải lên hiện trong lưới chậm vài giây
+        page.wait_for_timeout(1_500 if uploaded else 150)   # ô ảnh vừa tải lên hiện trong lưới nhanh hơn
         before = self.generated_tiles()
         before_top = before[0] if before else None
         before_labels = {t.label for t in before[:5]}
@@ -233,7 +237,7 @@ class _SessionOps:
         reply_sel, auto_reply = s.get("agent_reply_marker"), s.get("agent_auto_reply")
         can_reply = not _is_todo(reply_sel) and bool(auto_reply)
         replies = page.locator(reply_sel).count() if can_reply else 0
-        page.locator(s["generate_button"]).first.click()
+        send_prompt(page, s)
         deadline = time.monotonic() + 20
         replied, idle_since = False, None
         while time.monotonic() < deadline:
@@ -313,6 +317,21 @@ class _SessionOps:
 class FlowBrowserDriver:
     def __init__(self, selectors_file: Path):
         self.selectors_file = selectors_file
+        self._active_browser = None
+        atexit.register(self._close_active_browser)
+
+    def _close_active_browser(self):
+        ab = getattr(self, "_active_browser", None)
+        self._active_browser = None
+        if ab:
+            try:
+                ab["ctx"].close()
+            except Exception:
+                pass
+            try:
+                ab["pw_cm"].__exit__(None, None, None)
+            except Exception:
+                pass
 
     def _sel(self, required: list[str]) -> dict:
         try:
@@ -326,15 +345,35 @@ class FlowBrowserDriver:
         return s
 
     @contextmanager
-    def _browser(self, account: dict, headless: bool):
+    def _browser(self, account: dict, headless: bool, keep_alive: bool = True):
         if not account.get("profileDir"):
             raise ConfigError(f"Tài khoản {account.get('email')} chưa có thư mục profile")
         cfg = parse_proxy(account.get("proxy"))
         if cfg and cfg["server"].startswith("socks5") and cfg.get("username"):
             raise AccountBroken(f"Proxy \"{proxy_label(account.get('proxy'))}\": Chromium không hỗ trợ socks5 có user/pass. "
                                 "Đổi sang proxy http hoặc socks5 không mật khẩu")
-        with sync_playwright() as pw:
+
+        # Tái sử dụng trình duyệt nếu cùng tài khoản, cùng chế độ và cửa sổ vẫn đang mở
+        ab = getattr(self, "_active_browser", None)
+        reused = False
+        if ab:
+            same_account = ab.get("email") == account.get("email") and ab.get("profileDir") == account.get("profileDir")
+            same_headless = ab.get("headless") == headless
+            if same_account and same_headless:
+                try:
+                    ctx = ab.get("ctx")
+                    if ctx and ctx.pages and not ctx.pages[0].is_closed():
+                        reused = True
+                except Exception:
+                    reused = False
+            if not reused:
+                self._close_active_browser()
+
+        if not reused:
+            pw_cm = sync_playwright()
+            pw = pw_cm.__enter__()
             try:
+                launch_args = ["--start-maximized"] + get_stealth_args()
                 ctx = pw.chromium.launch_persistent_context(
                     user_data_dir=account["profileDir"],
                     channel="msedge",            # Edge có sẵn trên Windows: không phải đóng gói Chromium
@@ -342,10 +381,23 @@ class FlowBrowserDriver:
                     proxy=parse_proxy(account.get("proxy")),
                     accept_downloads=True,
                     viewport=None,
-                    args=["--start-maximized"],
+                    ignore_default_args=get_ignore_default_args(),
+                    args=launch_args,
                     chromium_sandbox=True,   # không thêm cờ --no-sandbox (Edge hiện cảnh báo "unsupported command-line flag")
                 )
+                apply_stealth(ctx)
+                self._active_browser = {
+                    "email": account.get("email"),
+                    "profileDir": account.get("profileDir"),
+                    "headless": headless,
+                    "pw_cm": pw_cm,
+                    "ctx": ctx,
+                }
             except PlaywrightError as e:
+                try:
+                    pw_cm.__exit__(None, None, None)
+                except Exception:
+                    pass
                 msg = str(e)
                 if "ProcessSingleton" in msg or "user data directory is already in use" in msg.lower():
                     # thường là cửa sổ đăng nhập của tài khoản còn mở: không tính lượt thử, đưa tài khoản về "Cần đăng nhập"
@@ -354,20 +406,31 @@ class FlowBrowserDriver:
                 if proxy_error(msg):
                     raise AccountBroken(f"Proxy \"{proxy_label(account.get('proxy'))}\" không dùng được: {proxy_error(msg)}") from e
                 raise TransientError(f"Không mở được Edge: {msg[:500]}") from e
-            try:
-                yield ctx
-            finally:
+        else:
+            ctx = self._active_browser["ctx"]
+
+        try:
+            yield ctx
+        finally:
+            if not keep_alive:
+                self._close_active_browser()
+            else:
                 try:
-                    ctx.close()
-                except PlaywrightError:
-                    pass
+                    if not ctx.pages or ctx.pages[0].is_closed():
+                        self._close_active_browser()
+                except Exception:
+                    self._close_active_browser()
 
     def _open_flow(self, ctx, job: dict):
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         page.set_default_timeout(45_000)
+        target = project_url(job.get("flowProjectUrl")) or FLOW_URL
         try:
-            # Flow giữ kết nối mở nên "networkidle" luôn chạy hết giờ: chỉ chờ domcontentloaded, ô prompt được chờ riêng sau đó
-            page.goto(project_url(job.get("flowProjectUrl")) or FLOW_URL, wait_until="domcontentloaded")
+            # Nếu trình duyệt đang sẵn ở dự án rồi thì không cần tải lại trang
+            if target and target in page.url and "/project/" in page.url:
+                log.info("Trình duyệt đang sẵn ở dự án Flow: %s (không tải lại trang)", page.url)
+            else:
+                page.goto(target, wait_until="domcontentloaded")
         except PlaywrightTimeout:
             pass
         except PlaywrightError as e:
@@ -379,6 +442,7 @@ class FlowBrowserDriver:
             raise TransientError(f"Không mở được trang Flow: {str(e)[:300]}") from e
         if "accounts.google.com" in page.url:
             raise AuthRequired(f"{job['account']['email']}: chưa đăng nhập hoặc phiên đã hết hạn")
+        detect_and_solve_turnstile(page, timeout_s=3.0)
         return page
 
     # ---------- các bước trên trang dự án Flow ----------
@@ -515,10 +579,10 @@ class FlowBrowserDriver:
             raise Cancelled("Người dùng hủy job")
         page.locator(s["add_reference_button"]).first.click()
         try:
-            page.locator(s["ingredient_listbox"]).first.wait_for(state="visible", timeout=4_000)
+            page.locator(s["ingredient_listbox"]).first.wait_for(state="visible", timeout=3_000)
         except PlaywrightTimeout:
             pass
-        page.wait_for_timeout(500)   # danh sách thành phần nạp nội dung chậm hơn khung một chút
+        page.wait_for_timeout(250)   # danh sách thành phần nạp nội dung
         have = self._listbox_names(page, s)
         need = [img for img in images if self._nfc(Path(img).name) not in have]
         if need:
@@ -531,7 +595,7 @@ class FlowBrowserDriver:
             while True:
                 if should_stop and should_stop():
                     raise Cancelled("Người dùng hủy job")
-                page.wait_for_timeout(1_000)
+                page.wait_for_timeout(500)   # kiểm tra mỗi 500ms để bắt ngay khi tải xong
                 text = self._listbox_text(page, s)
                 names = self._listbox_names(page, s)
                 if not any(u in text for u in uploading) and all(self._nfc(Path(i).name) in names for i in need):
@@ -541,7 +605,7 @@ class FlowBrowserDriver:
         else:
             log.info("Ảnh reference đã có sẵn trong dự án Flow, không tải lại")
         page.keyboard.press("Escape")
-        page.wait_for_timeout(300)
+        page.wait_for_timeout(150)
         return bool(need)
 
     @staticmethod
@@ -555,52 +619,62 @@ class FlowBrowserDriver:
 
     def _compose_prompt(self, page, s: dict, prompt: str, ref_ids: list[str], mention_all: bool = False) -> set[str]:
         """
-        Gõ prompt vào ô của Flow; mỗi "@ID" của ảnh reference thành chip mention: gõ "@", gõ ID, bấm đúng mục có tên
-        file "ID.png/.jpg" (không bấm Enter: "CHAR-CALEB-1" sẽ khớp nhầm "CHAR-CALEB-10"). Trả về tập ID đã gắn chip.
+        Gõ prompt vào ô của Flow; mỗi "@ID" của ảnh reference thành chip mention:
+        Chèn nhanh prompt (như copy-paste kịch bản vào) và gắn nhanh @tag để tiết kiệm thời gian cho prompt dài.
         """
         box = page.locator(s["prompt_box"]).first
         try:
             box.click(timeout=5_000)
         except PlaywrightError:
-            box.focus()   # bị lớp khác che (hộp hướng dẫn, popup): đặt con trỏ thẳng vào ô
+            box.focus()
         page.keyboard.press("Control+A")
         page.keyboard.press("Delete")
+
         ids = sorted({i for i in ref_ids if i}, key=len, reverse=True)
         if mention_all:   # chỉ prompt ảnh (biến thể trang phục): prompt video giữ nguyên như cũ
             prompt = self._mention_unmentioned_refs(prompt, ids)
         if not ids:
             page.keyboard.insert_text(prompt)
             return set()
+
         pattern = self._ref_pattern(ids)
         option_sel = s.get("ingredient_option") or "button[role=option]"
         pos, attached = 0, set()
         for m in pattern.finditer(prompt):
+            # 1. Chèn nhanh đoạn văn bản dài trước @tag (tức thì như Ctrl+V paste)
             if m.start() > pos:
-                page.keyboard.insert_text(prompt[pos:m.start()])
+                chunk = prompt[pos:m.start()]
+                page.keyboard.insert_text(chunk)
+
             ref = m.group(1)
+
+            # 2. Gõ phím @ và tên tag nhanh để Flow mở và lọc danh sách gợi ý
             page.keyboard.type("@")
-            page.wait_for_timeout(250)
-            page.keyboard.insert_text(ref)
+            page.wait_for_timeout(30)
+            page.keyboard.type(ref, delay=5)  # 5ms/ký tự để kích hoạt sự kiện lọc của ô tìm kiếm
+
             opt = page.locator(", ".join(f"{lb.strip()} {option_sel}" for lb in s["ingredient_listbox"].split(","))).filter(
                 has=page.locator("span", has_text=re.compile(r"^\s*" + re.escape(ref) + r"\.(png|jpe?g|webp)\s*$", re.I)))
             try:
-                opt.first.wait_for(state="visible", timeout=8_000)
-                opt.first.click()
+                opt.first.wait_for(state="visible", timeout=3_000)
+                human_click(page, opt.first, delay_before=0.02)
                 attached.add(ref)
-                page.wait_for_timeout(150)
-                self._caret_to_end(page, box)   # bố cục tạo trực tiếp: bấm chọn ảnh xong, con trỏ không về ô prompt
+                page.wait_for_timeout(30)
+                self._caret_to_end(page, box)
             except PlaywrightError:
-                # không thấy ảnh trong dự án: bỏ ô tìm kiếm, để lại chữ @ID thường
                 log.warning("Không thấy ảnh %s trong dự án Flow: để lại @%s dạng chữ", ref, ref)
                 page.keyboard.press("Escape")
-                page.wait_for_timeout(300)
+                page.wait_for_timeout(50)
                 self._caret_to_end(page, box, force=True)
                 page.keyboard.insert_text("@" + ref)
-            page.wait_for_timeout(100)
             pos = m.end()
+
+        # 3. Chèn nhanh phần prompt dài còn lại (tức thì)
         if pos < len(prompt):
-            page.keyboard.insert_text(prompt[pos:])
-        log.info("Đã gõ prompt (%d ký tự), gắn chip @tag cho %d ảnh", len(prompt), len(attached))
+            chunk = prompt[pos:]
+            page.keyboard.insert_text(chunk)
+
+        log.info("Đã điền nhanh prompt (%d ký tự), gắn chip @tag cho %d ảnh", len(prompt), len(attached))
         return attached
 
     @classmethod
@@ -710,9 +784,9 @@ class FlowBrowserDriver:
     def _send(self, page, s: dict, text: str):
         box = page.locator(s["prompt_box"]).first
         box.click()
-        page.keyboard.insert_text(text)
+        human_type(page, box, text)
         page.wait_for_timeout(300)
-        page.locator(s["generate_button"]).first.click()
+        send_prompt(page, s)
 
     def _wait_result(self, page, s: dict, before: set, errors: dict, should_stop, timeout_s: int,
                      kind: str | None = None) -> str:
@@ -733,10 +807,14 @@ class FlowBrowserDriver:
         started = time.monotonic()
         deadline = time.monotonic() + timeout_s
         last_log = 0.0
+        last_turnstile_check = 0.0
         while time.monotonic() < deadline:
             if should_stop():
                 raise Cancelled("Người dùng hủy job")
             self._raise_if_error(page, s, errors)
+            if time.monotonic() - last_turnstile_check > 5.0:
+                last_turnstile_check = time.monotonic()
+                detect_and_solve_turnstile(page, timeout_s=0.5)
             # Video xong: Flow tự chuyển sang /project/<id>/edit/<media id> (không còn lưới ô) -> media id lấy từ địa chỉ
             edit_id = edit_media_id(page.url)
             if edit_id and edit_id not in before:
@@ -990,7 +1068,7 @@ class FlowBrowserDriver:
                         with tm.step("upload_anh"):
                             uploaded = self._upload_refs(page, s, job["referenceImages"], should_stop)
                             # ô ảnh vừa tải lên hiện trong lưới chậm vài giây; không upload gì thì không cần chờ
-                            page.wait_for_timeout(4_000 if uploaded else 300)
+                            page.wait_for_timeout(1_500 if uploaded else 150)
                         before = set(self._media_ids(page, s))
                         errors = self._error_counts(page, s)
                         with tm.step("go_prompt"):
@@ -1001,7 +1079,7 @@ class FlowBrowserDriver:
                         if should_stop():
                             raise Cancelled("Người dùng hủy job")
                         self._save_pending(page, job, before)
-                        page.locator(s["generate_button"]).first.click()
+                        send_prompt(page, s)
                         with tm.step("cho_google"):
                             media_id = self._wait_result(page, s, before, errors, should_stop, job["timeoutSeconds"], job["kind"])
                     with tm.step("tai_ve"):
@@ -1103,7 +1181,7 @@ class FlowBrowserDriver:
         box.click()
         page.keyboard.press("Control+A")
         page.keyboard.press("Delete")
-        page.keyboard.insert_text(job["editInstruction"])
+        human_type(page, box, job["editInstruction"])
         page.wait_for_timeout(500)
         log.info("Sửa trên Flow %s: %s", job["externalId"], job["editInstruction"])
         self._save_pending(page, job, before)
@@ -1156,10 +1234,31 @@ class FlowBrowserDriver:
                 ctx.grant_permissions(["clipboard-read", "clipboard-write"], origin="https://flow.google.com")
             except PlaywrightError:
                 pass
-            ctx.expose_binding("afmAction", lambda source, action: user_action.append(str(action)))
+            if not hasattr(ctx, "_afm_handlers"):
+                ctx._afm_handlers = []
+                try:
+                    ctx.expose_binding("afmAction", lambda source, action: [h(str(action)) for h in list(getattr(ctx, "_afm_handlers", []))])
+                except PlaywrightError:
+                    pass
+            ctx._afm_handlers.append(user_action.append)
             ctx.add_init_script(overlay_script(job, refs_folder))
             page = self._open_flow(ctx, job)
             page_ref.append(page)
+            try:
+                refs = [Path(p).stem for p in job.get("referenceImages") or []]
+                title = (f"Video STT {job['externalId']}" if job["kind"] == "VIDEO" else f"Ảnh {job['externalId']}")
+                overlay_data = {
+                    "title": title,
+                    "kind": job["kind"],
+                    "refs": refs,
+                    "refsFolder": str(refs_folder) if refs_folder else "",
+                    "prompt": job.get("prompt") or "",
+                    "duration": job.get("durationSeconds"),
+                    "quality": job.get("videoQuality"),
+                }
+                page.evaluate("d => { if (window.__afmUpdate) window.__afmUpdate(d); else window.__afmData = d; }", overlay_data)
+            except Exception:
+                pass
             self._ensure_project(page, job)
             self._raise_if_login(page, job)
             resume = None
@@ -1176,9 +1275,9 @@ class FlowBrowserDriver:
                 filled = self._prefill_best_effort(page, s, job, should_stop)
                 if not filled and refs_folder:
                     open_in_explorer(refs_folder)  # tự gắn không được: mở thư mục ảnh để người dùng kéo tay
-            # Ảnh: điền đủ prompt + @tag thì app tự bấm Tạo và tự tải về (người dùng vẫn duyệt ở màn Duyệt).
-            # Video, hoặc khi điền chưa đủ: người dùng tự kiểm tra, bấm Tạo và Tải xuống.
-            auto = bool(resume) or (filled and job["kind"] == "IMAGE")
+            # Điền sẵn prompt và gắn ảnh @tag; để người dùng tự kiểm tra và bấm Tạo theo yêu cầu.
+            # Chỉ auto khi resume (ảnh/video lần trước đã tạo xong cần tải về).
+            auto = bool(resume)
             state = {"last_check": time.monotonic(), "errors": self._error_counts(page, s)}
 
             def check():
@@ -1204,38 +1303,64 @@ class FlowBrowserDriver:
                     try:
                         if resume:
                             media_id = resume
-                            _status(page, "✓ Ảnh của lần trước đã tạo xong trên Flow, đang tải về (không tạo lại)…")
-                        else:
-                            page.wait_for_timeout(4_000)
-                            check()
-                            before = set(self._media_ids(page, s))
-                            log.info("FOREGROUND %s: đã điền đủ, tự bấm Tạo", job["externalId"])
-                            _status(page, "Đang tạo ảnh… thường mất 1–2 phút. ĐỪNG đóng cửa sổ, app tự tải về khi xong")
-                            self._save_pending(page, job, before)
-                            page.locator(s["generate_button"]).first.click()
-                            media_id = self._wait_result(page, s, before, state["errors"], lambda: check() or False, job["timeoutSeconds"],
-                                                       job["kind"])
-                        _status(page, "✓ Có ảnh, đang tải về…")
-                        self._click_download(page, s, media_id, job["kind"], job.get("videoQuality") or DEFAULT_VIDEO_QUALITY)
+                            _status(page, "✓ Kết quả của lần trước đã có trên Flow, đang tải về…")
+                            _status(page, f"✓ Có {'video' if job['kind'] == 'VIDEO' else 'ảnh'}, đang tải về…")
+                            self._click_download(page, s, media_id, job["kind"], job.get("videoQuality") or DEFAULT_VIDEO_QUALITY)
                     except (TransientError, PlaywrightTimeout) as e:
-                        # chưa thấy kết quả / không bấm tải được: để người dùng tự tải trong cửa sổ này
                         log.warning("FOREGROUND %s: không tự lấy được kết quả: %s", job["externalId"], e)
-                        _status(page, "Chưa tự lấy được ảnh: khi có kết quả, bấm ⋮ → Tải xuống")
+                        _status(page, f"Chưa tự lấy được {'video' if job['kind'] == 'VIDEO' else 'ảnh'}: khi có kết quả, bấm ⋮ → Tải xuống")
                 else:
-                    log.info("FOREGROUND %s: đã mở Flow, chờ người dùng tạo và bấm Tải xuống", job["externalId"])
-                deadline = time.monotonic() + 120 if auto else None
+                    log.info("FOREGROUND %s: đã điền đủ prompt + @tag, chờ người dùng bấm Tạo", job["externalId"])
+                    if filled:
+                        _status(page, "✓ Đã điền xong prompt và gắn @tag. Mời bạn kiểm tra và bấm nút Tạo!")
+
+                before = set(self._media_ids(page, s) or [])
+                generating = False
                 while not captured:
                     check()
+                    if "generate_now" in user_action:
+                        user_action.remove("generate_now")
+                        _status(page, "Đang gửi prompt và bấm Tạo…")
+                        send_prompt(page, s)
+                        generating = True
+
+                    # Tự động nhận diện khi người dùng đã bấm Tạo hoặc có kết quả mới xuất hiện
+                    edit_id = edit_media_id(page.url)
+                    if edit_id and edit_id not in before:
+                        _status(page, f"✓ Đã xong {'video' if job['kind'] == 'VIDEO' else 'ảnh'}, đang tải về…")
+                        try:
+                            self._click_download(page, s, edit_id, job["kind"], job.get("videoQuality") or DEFAULT_VIDEO_QUALITY)
+                        except Exception as e:
+                            log.warning("Chưa tự bấm tải được trên trang chỉnh sửa: %s", e)
+                    else:
+                        current_ids = set(self._media_ids(page, s) or [])
+                        new_ids = [m for m in current_ids if m and m not in before]
+                        if new_ids:
+                            if not generating:
+                                generating = True
+                                _status(page, f"Đang tạo {'video' if job['kind'] == 'VIDEO' else 'ảnh'}… Bạn có thể bấm Tải xuống khi xong (hoặc app tự tải).")
+                            for mid in new_ids:
+                                try:
+                                    if self._media_ready(page, mid):
+                                        _status(page, "✓ Đã có kết quả, đang tải về…")
+                                        self._click_download(page, s, mid, job["kind"], job.get("videoQuality") or DEFAULT_VIDEO_QUALITY)
+                                        break
+                                except Exception:
+                                    pass
+
                     ctx.pages[0].wait_for_timeout(1_000)  # để Playwright xử lý sự kiện download / nút bấm trong lúc chờ
-                    if deadline and time.monotonic() > deadline:
-                        deadline = None
-                        _status(page, "Chưa thấy file tải về: bấm ⋮ → Tải xuống trên ảnh vừa tạo")
             except PlaywrightError as e:
                 # chỉ khi cửa sổ thật sự đóng mới tạm dừng phim (cảnh này quay về "Chờ chạy"); lỗi khác là lỗi tạm thời
                 if page.is_closed() or not ctx.pages:
                     raise PausedByUser(f"Bạn đã đóng cửa sổ Flow ở cảnh {job['externalId']}") from e
                 raise TransientError(f"Lỗi trình duyệt khi chờ tải về: {str(e)[:300]}") from e
             self._clear_pending(job)
+            try:
+                ctx.remove_listener("download", on_download)
+            except Exception:
+                pass
+            if hasattr(ctx, "_afm_handlers") and user_action.append in ctx._afm_handlers:
+                ctx._afm_handlers.remove(user_action.append)
             return GenerationResult(staged_file=captured[-1], remote_ref=project_url(page.url) if not page.is_closed() else None)
 
     @staticmethod

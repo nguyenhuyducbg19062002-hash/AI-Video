@@ -24,5 +24,7 @@ public record JobPayload(
         String videoQuality,
         /** "Sửa trên Flow": yêu cầu sửa + địa chỉ màn chỉnh sửa của kết quả cũ. null = tạo mới. */
         String editInstruction,
-        String editSourceUrl) {
+        String editSourceUrl,
+        /** Seedance: tạo kèm âm thanh; null = theo mặc định (bật). */
+        Boolean generateAudio) {
 }

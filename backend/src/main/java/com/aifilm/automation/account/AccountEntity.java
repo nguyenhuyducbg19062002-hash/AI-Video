@@ -36,6 +36,14 @@ public class AccountEntity {
 
     private String gcpProject;
     private String gcpLocation;
+    /** SEEDANCE_API / GOOGLE_AI_STUDIO: API key. Không trả ra ngoài qua API (chỉ ghi), giao diện chỉ thấy hasApiKey. */
+    @com.fasterxml.jackson.annotation.JsonProperty(access = com.fasterxml.jackson.annotation.JsonProperty.Access.WRITE_ONLY)
+    @Column(length = 500)
+    private String apiKey;
+
+    /** SEEDANCE_API / GOOGLE_AI_STUDIO: mã model video / ảnh; trống = mặc định của engine. */
+    private String videoModel;
+    private String imageModel;
     private String proxy;
 
     @Enumerated(EnumType.STRING)
@@ -74,6 +82,11 @@ public class AccountEntity {
     @PreUpdate
     void onUpdate() {
         updatedAt = LocalDateTime.now();
+    }
+
+    @com.fasterxml.jackson.annotation.JsonProperty("hasApiKey")
+    public boolean hasApiKey() {
+        return apiKey != null && !apiKey.isBlank();
     }
 
     public void lease(long jobId, LocalDateTime now) {

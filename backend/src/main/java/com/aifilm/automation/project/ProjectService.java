@@ -37,7 +37,7 @@ public class ProjectService {
                               RunMode runMode, Provider provider, String flowProjectUrl, String aspectRatio,
                               Integer maxParallel, Integer maxAttempts, Boolean waitAllImages,
                               Integer videoDuration, String videoQuality, Boolean skipMissingRefs,
-                              Boolean autoApproveImages) {}
+                              Boolean autoApproveImages, Boolean generateAudio) {}
 
     /** missingRefs: Reference ID phim cần mà chưa có prompt tạo ảnh và chưa có ảnh trong kho (ảnh gốc cần "Thêm ảnh có sẵn"). */
     public record ProjectView(ProjectEntity project, Map<String, Long> counts, long total, long imagesTotal,
@@ -373,6 +373,7 @@ public class ProjectService {
         if (f.maxAttempts() != null) p.setMaxAttempts(Math.max(1, f.maxAttempts()));
         if (f.waitAllImages() != null) p.setWaitAllImages(f.waitAllImages());
         if (f.autoApproveImages() != null) p.setAutoApproveImages(f.autoApproveImages());
+        if (f.generateAudio() != null) p.setGenerateAudio(f.generateAudio());
         p.setVideoDuration(f.videoDuration() == null || f.videoDuration() <= 0 ? null : f.videoDuration());
         if (f.videoQuality() != null) {
             String q = f.videoQuality().trim().toLowerCase(Locale.ROOT);

@@ -76,21 +76,29 @@ public class JobClaimService {
         Set<String> have = new HashSet<>();
         assets.findByProjectId(p.getId()).forEach(a -> have.add(a.getExternalId()));
         int scanned = 0;
-        // Lần lượt từng cảnh: cảnh đầu tiên chưa xong là cảnh duy nhất được làm (ảnh của nó rồi tới video của nó).
-        // Cảnh kế tiếp chỉ bắt đầu khi video cảnh trước đã tạo xong. Không làm hàng loạt ảnh của nhiều cảnh trước.
+        int maxParallel = p.effectiveParallel();
+        // Lần lượt từng cảnh: cảnh đầu tiên chưa xong là cảnh được ưu tiên làm trước (ảnh của nó rồi tới video của nó).
+        // Nếu maxParallel > 1 (chạy song song nhiều tài khoản): khi video cảnh trước đang tạo hoặc đang đợi ảnh,
+        // cho phép xét tiếp cảnh sau để tài khoản rảnh khác có thể làm song song theo đúng thứ tự cảnh.
         for (JobEntity video : selectedOnly ? jobs.findOpenSelectedVideoJobsInOrder(p.getId()) : jobs.findOpenVideoJobsInOrder(p.getId())) {
             if (++scanned > SCENE_SCAN_LIMIT) {
                 break;
             }
             if (video.getStatus() == JobStatus.GENERATING) {
-                return Optional.empty();   // video của cảnh này đang tạo: chờ xong mới sang cảnh sau
+                if (maxParallel <= 1) {
+                    return Optional.empty();   // video của cảnh này đang tạo: chờ xong mới sang cảnh sau
+                }
+                continue;                      // song song: video này đang tạo bởi tài khoản khác, xét cảnh tiếp theo
             }
             Optional<JobEntity> pick = runnableFor(video, p.getId(), have, new HashSet<>(), 0).filter(j -> !skip.contains(j.getId()));
             if (pick.isPresent()) {
                 return pick;
             }
             if (waitingOnImages(video, p.getId(), have, new HashSet<>(), 0)) {
-                return Optional.empty();   // ảnh của cảnh này đang tạo / chờ duyệt: chờ, không nhảy sang cảnh khác
+                if (maxParallel <= 1) {
+                    return Optional.empty();   // ảnh của cảnh này đang tạo / chờ duyệt: chờ, không nhảy sang cảnh khác
+                }
+                continue;                      // song song: ảnh cảnh này đang được làm, xét cảnh kế tiếp
             }
             // cảnh không chạy được hẳn (thiếu ảnh mà không có prompt tạo, chưa khai báo ảnh…): bỏ qua, xét cảnh sau
         }

@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -33,7 +34,8 @@ public class AccountController {
     private final JobRepository jobs;
 
     public record AccountForm(String email, Provider provider, String proxy, Integer priority, String notes,
-                              String credentialFile, String gcpProject, String gcpLocation, Integer maxConcurrent) {}
+                              String credentialFile, String gcpProject, String gcpLocation, Integer maxConcurrent,
+                              String apiKey, String videoModel, String imageModel) {}
 
     @GetMapping
     public List<AccountEntity> list() {
@@ -119,8 +121,21 @@ public class AccountController {
         // (Không dùng accounts.google.com/AccountChooser?Email=…: Google trả lỗi 400 Bad Request cho link này.)
         // --disable-background-mode: đóng cửa sổ là Edge thoát hẳn, nhả profile (không thì Edge còn chạy nền giữ khóa profile,
         // job và nút Kiểm tra đăng nhập sau đó báo "profile đang mở ở cửa sổ khác")
-        new ProcessBuilder(edge.toString(), "--user-data-dir=" + a.getProfileDir(),
-                "--no-first-run", "--no-default-browser-check", "--disable-background-mode", FLOW_URL).start();
+        List<String> cmd = new ArrayList<>(List.of(
+                edge.toString(),
+                "--user-data-dir=" + a.getProfileDir(),
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--disable-background-mode",
+                "--disable-blink-features=AutomationControlled"
+        ));
+        Path ext = AppPaths.home().resolve("engine").resolve("extension");
+        if (Files.isDirectory(ext) && Files.isRegularFile(ext.resolve("manifest.json"))) {
+            cmd.add("--disable-extensions-except=" + ext.toAbsolutePath());
+            cmd.add("--load-extension=" + ext.toAbsolutePath());
+        }
+        cmd.add(FLOW_URL);
+        new ProcessBuilder(cmd).start();
         return a;
     }
 
@@ -185,6 +200,11 @@ public class AccountController {
         a.setCredentialFile(blankToNull(f.credentialFile()));
         a.setGcpProject(blankToNull(f.gcpProject()));
         a.setGcpLocation(blankToNull(f.gcpLocation()));
+        if (f.apiKey() != null && !f.apiKey().isBlank()) {   // để trống khi sửa = giữ key cũ
+            a.setApiKey(f.apiKey().trim());
+        }
+        a.setVideoModel(blankToNull(f.videoModel()));
+        a.setImageModel(blankToNull(f.imageModel()));
         if (f.priority() != null) {
             a.setPriority(f.priority());
         }

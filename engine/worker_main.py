@@ -43,6 +43,12 @@ def driver_for(provider: str):
             elif provider == "VERTEX_API":
                 from drivers.vertex_api import VertexDriver
                 _drivers[provider] = VertexDriver()
+            elif provider == "SEEDANCE_API":
+                from drivers.seedance_api import SeedanceDriver
+                _drivers[provider] = SeedanceDriver()
+            elif provider == "GOOGLE_AI_STUDIO":
+                from drivers.google_studio_api import GoogleStudioDriver
+                _drivers[provider] = GoogleStudioDriver()
             elif provider == "FAKE":
                 from drivers.fake_driver import FakeDriver
                 _drivers[provider] = FakeDriver()

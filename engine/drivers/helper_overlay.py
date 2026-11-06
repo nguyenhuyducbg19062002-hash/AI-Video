@@ -83,17 +83,19 @@ _OVERLAY_JS = r"""
       status.style.background = done ? '#dcfce7' : '#fef3c7';
       status.style.color = done ? '#166534' : '#92400e';
     };
+    window.__afmUpdate = (newData) => {
+      Object.assign(d, newData);
+      const b = head.querySelector('b');
+      if (b) b.textContent = 'AI Film Maker · ' + (newData.title || '');
+      if (ta) ta.value = newData.prompt || '';
+      if (newData.title) window.__afmStatus('App đang tự điền cho ' + newData.title + '…');
+    };
     body.append(status);
     const steps = el('ol', 'margin:0 0 10px 18px;padding:0;');
     const add = (t) => steps.append(el('li', 'margin:2px 0', t));
-    add('App tự mở dự án, tự tải ' + (d.refs.length ? d.refs.length + ' ảnh lên Flow và ' : '') + 'gõ prompt có sẵn @tag (chip ảnh) vào ô chat. Đợi vài giây cho xong.');
-    if (d.kind === 'IMAGE') {
-      add('Ảnh: điền xong là app TỰ bấm Tạo, chờ kết quả và tự tải về (1K) sang màn Duyệt. Bạn chỉ cần xem.');
-      add('Nếu app báo chưa tự lấy được ảnh: bấm ⋮ → Tải xuống trên ảnh vừa tạo.');
-    } else {
-      add('Video: kiểm tra ô prompt' + (d.duration ? ', chọn độ dài ' + d.duration + ' giây' : '') + ' rồi bấm Tạo (mũi tên). Nếu Tác nhân hỏi "proceed?", trả lời "Yes".');
-      add('Khi có video ưng ý: ⋮ → Tải xuống' + (d.quality ? ' (' + d.quality + ')' : '') + ': app tự lưu và chuyển sang màn Duyệt.');
-    }
+    add('App tự mở dự án, tự tải ' + (d.refs.length ? d.refs.length + ' ảnh lên Flow và ' : '') + 'gõ prompt có sẵn @tag (chip ảnh) vào ô chat.');
+    add('BẠN TỰ BẤM GỬI: Sau khi app điền xong prompt và gắn @tag, bạn hãy kiểm tra lại rồi bấm nút Tạo (hoặc Enter) khi sẵn sàng.');
+    add('Khi Flow tạo xong: bạn bấm Tải xuống (hoặc app sẽ tự bắt file tải về), lưu đúng ID cảnh và chuyển sang cảnh kế tiếp.');
     if (d.refs.length) add('Nếu app không tự gắn được ảnh (thư mục ảnh sẽ tự mở): kéo ảnh theo ĐÚNG thứ tự bên dưới, rồi dùng "Copy prompt".');
     body.append(steps);
 
@@ -127,8 +129,9 @@ _OVERLAY_JS = r"""
       return b;
     };
     row.append(
-      act('⏸ Tạm dừng phim', 'pause', 'border:1px solid #f59e0b;background:#fffbeb;color:#b45309;', null),
-      act('Bỏ qua cảnh này', 'skip', 'border:1px solid #cbd5e1;background:#fff;color:#475569;', 'Bỏ qua cảnh này và chuyển sang cảnh tiếp theo?'));
+      act('🚀 Gửi prompt (Tạo)', 'generate_now', 'border:1px solid #4f46e5;background:#4f46e5;color:#fff;', null),
+      act('⏸ Tạm dừng', 'pause', 'border:1px solid #f59e0b;background:#fffbeb;color:#b45309;', null),
+      act('Bỏ qua', 'skip', 'border:1px solid #cbd5e1;background:#fff;color:#475569;', 'Bỏ qua cảnh này?'));
     const row2 = el('div', 'display:flex;gap:6px;margin-top:6px;');
     row2.append(act('Tài khoản hết lượt → đổi tài khoản', 'quota', 'border:1px solid #fca5a5;background:#fef2f2;color:#b91c1c;',
       'Đánh dấu tài khoản này hết lượt (nghỉ vài giờ) và làm cảnh này trên tài khoản khác?'));

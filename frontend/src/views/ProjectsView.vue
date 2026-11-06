@@ -315,7 +315,7 @@ const folders = computed(() => current.value ? [
 
 const ratio = (a, b) => (b ? Math.min(100, Math.round((a / b) * 100)) : 0)
 const pct = (pv) => ratio(pv.counts.SUCCESS, pv.total)
-const providerLabel = (p) => ({ FLOW_BROWSER: 'Google Flow', VERTEX_API: 'Vertex AI', FAKE: 'Chạy thử' }[p] || p)
+const providerLabel = (p) => ({ FLOW_BROWSER: 'Google Flow', GOOGLE_AI_STUDIO: 'Google AI Studio', VERTEX_API: 'Vertex AI', SEEDANCE_API: 'Seedance', FAKE: 'Chạy thử' }[p] || p)
 const modeText = (p) => `${p.runMode === 'BACKGROUND' ? 'Chạy ngầm' : 'Mở Flow (bạn tự bấm tạo)'} · ${providerLabel(p.provider)}`
 
 async function loadJobs() {

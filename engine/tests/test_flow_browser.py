@@ -470,6 +470,23 @@ class DownloadTests(unittest.TestCase):
             with self.assertRaises(TransientError):
                 self._download(None, should_stop=lambda: False)
 
+    def test_compose_prompt_human_typing_and_tags(self):
+        with mock.patch("drivers.flow_browser.time.sleep", return_value=None), mock.patch("drivers.stealth.time.sleep", return_value=None):
+            d = fb.FlowBrowserDriver(selectors_file="dummy.json")
+            page = mock.MagicMock()
+            box = mock.MagicMock()
+            box.evaluate.return_value = True
+            page.locator.return_value.first = box
+
+            opt = mock.MagicMock()
+            opt.first.bounding_box.return_value = {"x": 50, "y": 50, "width": 80, "height": 30}
+            page.locator.return_value.filter.return_value = opt
+
+            s = {"prompt_box": "box", "ingredient_listbox": "lb", "ingredient_option": "opt"}
+            attached = d._compose_prompt(page, s, "Scene with @LOC-1 and @CHAR-1 done", ["LOC-1", "CHAR-1"])
+            self.assertEqual(attached, {"LOC-1", "CHAR-1"})
+            self.assertTrue(page.keyboard.type.called)
+
 
 class OverlayTests(unittest.TestCase):
     def test_copy_oserror_is_transient(self):

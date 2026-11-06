@@ -65,6 +65,9 @@ public class JobPayloadFactory {
         acc.put("credentialFile", account.getCredentialFile());
         acc.put("gcpProject", account.getGcpProject());
         acc.put("gcpLocation", account.getGcpLocation());
+        acc.put("apiKey", account.getApiKey());
+        acc.put("videoModel", account.getVideoModel());
+        acc.put("imageModel", account.getImageModel());
 
         return new JobPayload(
                 job.getId(),
@@ -84,7 +87,8 @@ public class JobPayloadFactory {
                 Boolean.parseBoolean(settings.getSetting("headless", "false")),
                 prompt.getKind() == PromptKind.VIDEO ? project.getVideoDuration() : null,
                 project.getVideoQuality() == null ? "720p" : project.getVideoQuality(),
-                job.getEditInstruction(), job.getEditInstruction() == null ? null : job.getFlowMediaUrl());
+                job.getEditInstruction(), job.getEditInstruction() == null ? null : job.getFlowMediaUrl(),
+                project.getGenerateAudio());
     }
 
     /**

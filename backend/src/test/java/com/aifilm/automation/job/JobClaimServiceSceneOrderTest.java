@@ -39,6 +39,7 @@ class JobClaimServiceSceneOrderTest {
         service = new JobClaimService(jobs, null, null, null, null, assets, references, null);
         project = new ProjectEntity();
         project.setId(1L);
+        project.setMaxParallel(1);
 
         video1 = job(100L, 10L, PromptKind.VIDEO);   // cảnh 1 cần CHAR-A (có sẵn) + PANEL-1 (chưa có)
         video2 = job(101L, 11L, PromptKind.VIDEO);   // cảnh 2 chỉ cần CHAR-A
@@ -69,6 +70,20 @@ class JobClaimServiceSceneOrderTest {
     void sceneVideoGenerating_nextSceneWaits() {
         video1.setStatus(JobStatus.GENERATING);
         assertTrue(service.nextBySceneOrder(project).isEmpty());
+    }
+
+    @Test
+    void sceneVideoGenerating_parallelEnabled_nextSceneCanRun() {
+        project.setMaxParallel(3);
+        video1.setStatus(JobStatus.GENERATING);
+        assertEquals(101L, service.nextBySceneOrder(project).orElseThrow().getId());
+    }
+
+    @Test
+    void imageWaitingReview_parallelEnabled_nextSceneCanRunIfReady() {
+        project.setMaxParallel(3);
+        panel1.setStatus(JobStatus.AWAITING_REVIEW);
+        assertEquals(101L, service.nextBySceneOrder(project).orElseThrow().getId());
     }
 
     @Test

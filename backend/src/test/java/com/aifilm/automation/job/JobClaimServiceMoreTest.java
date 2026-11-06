@@ -75,7 +75,7 @@ class JobClaimServiceMoreTest {
         when(jobs.countByProjectIdAndStatus(1L, JobStatus.GENERATING)).thenReturn(1L);
         when(jobs.findNextRunnable(anyLong(), anyInt(), anyInt(), anyInt(), any())).thenReturn(Optional.of(candidate));
         when(payloads.forGenerate(any(), any(), any())).thenReturn(new JobPayload(101L, "VIDEO", "FLOW_BROWSER", "BACKGROUND",
-                "2", "p", List.of(), Map.of(), "s", null, "16:9", 600, false, null, "720p", null, null));
+                "2", "p", List.of(), Map.of(), "s", null, "16:9", 600, false, null, "720p", null, null, null));
     }
 
     @Test

@@ -97,17 +97,20 @@
         </div>
         <div class="p-5 space-y-4">
           <div>
-            <label class="label">Email <span class="text-rose-500">*</span></label>
-            <input v-model="form.email" :disabled="!!editing" required class="input" placeholder="ten@gmail.com"
+            <label class="label">{{ isApi ? 'Tên tài khoản' : 'Email' }} <span class="text-rose-500">*</span></label>
+            <input v-model="form.email" :disabled="!!editing" required class="input" :placeholder="isApi ? 'seedance-1' : 'ten@gmail.com'"
               name="afm-account-email" autocomplete="off" />
-            <p class="hint">App không cần và không lưu mật khẩu Google: bạn tự đăng nhập một lần bằng nút "Đăng nhập".</p>
+            <p v-if="isApi" class="hint">Đặt tên gì cũng được, không trùng tên tài khoản khác. Không cần email.</p>
+            <p v-else class="hint">App không cần và không lưu mật khẩu Google: bạn tự đăng nhập một lần bằng nút "Đăng nhập".</p>
           </div>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label class="label">Nền tảng</label>
               <select v-model="form.provider" :disabled="!!editing" class="input">
                 <option value="FLOW_BROWSER">Google Flow</option>
+                <option value="GOOGLE_AI_STUDIO">Google AI Studio (API key)</option>
                 <option value="VERTEX_API">Vertex AI</option>
+                <option value="SEEDANCE_API">Seedance (ModelArk)</option>
                 <option value="FAKE">Chạy thử</option>
               </select>
             </div>
@@ -143,6 +146,60 @@
               <div><label class="label">Vùng (location)</label><input v-model="form.gcpLocation" class="input font-mono" placeholder="us-central1" /></div>
             </div>
           </template>
+                    <template v-if="form.provider === 'GOOGLE_AI_STUDIO'">
+            <div>
+              <label class="label">API key Google AI Studio <span v-if="!editing?.hasApiKey" class="text-rose-500">*</span></label>
+              <input v-model="form.apiKey" type="password" class="input font-mono" autocomplete="off" name="afm-studio-key"
+                :required="!editing?.hasApiKey"
+                :placeholder="editing?.hasApiKey ? 'Đã lưu key: để trống nếu không đổi' : 'Dán API key từ aistudio.google.com'" />
+              <p class="hint">Lấy key tại <a href="https://aistudio.google.com/app/apikey" target="_blank" class="text-indigo-600 hover:underline">aistudio.google.com/app/apikey</a>. Key chỉ lưu trong máy này và không hiện lại.</p>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label class="label">Model video</label>
+                <input v-model="form.videoModel" list="afm-studio-video-models" class="input font-mono" placeholder="veo-2.0-generate-001" />
+                <datalist id="afm-studio-video-models">
+                  <option value="veo-2.0-generate-001">Veo 2 (mặc định)</option>
+                  <option value="veo-3.1-generate-preview">Veo 3.1 preview</option>
+                </datalist>
+              </div>
+              <div>
+                <label class="label">Model ảnh</label>
+                <input v-model="form.imageModel" list="afm-studio-image-models" class="input font-mono" placeholder="imagen-3.0-generate-002" />
+                <datalist id="afm-studio-image-models">
+                  <option value="imagen-3.0-generate-002">Imagen 3 (mặc định, chất lượng cao)</option>
+                  <option value="imagen-3.0-fast-generate-001">Imagen 3 Fast (tốc độ nhanh)</option>
+                </datalist>
+              </div>
+            </div>
+            <p class="hint -mt-2">Để trống = dùng mặc định Imagen 3 (ảnh) và Veo 2 (video). Mỗi tài khoản chạy độc lập qua API; muốn tăng lượt chạy có thể thêm nhiều key.</p>
+          </template>
+          <template v-if="form.provider === 'SEEDANCE_API'">
+            <div>
+              <label class="label">API key ModelArk <span v-if="!editing?.hasApiKey" class="text-rose-500">*</span></label>
+              <input v-model="form.apiKey" type="password" class="input font-mono" autocomplete="off" name="afm-ark-key"
+                :required="!editing?.hasApiKey"
+                :placeholder="editing?.hasApiKey ? 'Đã lưu key: để trống nếu không đổi' : 'Dán API key từ ModelArk console'" />
+              <p class="hint">Key chỉ lưu trong máy này và không hiện lại trên giao diện.</p>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label class="label">Model video</label>
+                <input v-model="form.videoModel" list="afm-seedance-models" class="input font-mono" placeholder="dreamina-seedance-2-0-mini-260615" />
+                <datalist id="afm-seedance-models">
+                  <option value="dreamina-seedance-2-0-260128">Seedance 2.0</option>
+                  <option value="dreamina-seedance-2-0-mini-260615">Seedance 2.0 mini (mặc định, 720p/480p)</option>
+                </datalist>
+              </div>
+              <div>
+                <label class="label">Model ảnh</label>
+                <input v-model="form.imageModel" class="input font-mono" placeholder="seedream-5-0-lite-260128" />
+              </div>
+            </div>
+            <p class="hint -mt-2">Bấm vào ô để chọn model có sẵn, hoặc dán mã khác: trên Playground chọn model rồi xem mã ở thanh địa chỉ
+              (<span class="font-mono">...gen_video?model=<b>mã-model</b></span>). Để trống = Seedance 2.0 mini. Model phải được bật (Activate) trong ModelArk console. Mỗi tài khoản chạy một cảnh
+              một lúc; muốn chạy song song thì thêm cùng key thêm lần nữa với tên khác.</p>
+          </template>
           <div>
             <label class="label">Ghi chú</label>
             <input v-model="form.notes" class="input" />
@@ -166,13 +223,14 @@ import { store } from '@/store'
 
 const showModal = ref(false)
 const editing = ref(null)
-const blank = () => ({ email: '', provider: 'FLOW_BROWSER', priority: 100, maxConcurrent: 1, proxy: '', notes: '', credentialFile: '', gcpProject: '', gcpLocation: '' })
+const blank = () => ({ email: '', provider: 'FLOW_BROWSER', priority: 100, maxConcurrent: 1, proxy: '', notes: '', credentialFile: '', gcpProject: '', gcpLocation: '', apiKey: '', videoModel: '', imageModel: '' })
 const form = ref(blank())
+const isApi = computed(() => form.value.provider === 'SEEDANCE_API' || form.value.provider === 'GOOGLE_AI_STUDIO')
 
 const summary = computed(() => ['READY', 'LEASED', 'COOLDOWN', 'NEED_LOGIN', 'DISABLED']
   .map((status) => ({ status, count: store.accounts.filter((a) => a.status === status).length })))
 
-const providerLabel = (p) => ({ FLOW_BROWSER: 'Google Flow', VERTEX_API: 'Vertex AI', FAKE: 'Chạy thử' }[p] || p)
+const providerLabel = (p) => ({ FLOW_BROWSER: 'Google Flow', GOOGLE_AI_STUDIO: 'Google AI Studio', VERTEX_API: 'Vertex AI', SEEDANCE_API: 'Seedance', FAKE: 'Chạy thử' }[p] || p)
 const fmt = (s) => new Date(s).toLocaleString('vi-VN')
 
 function openModal(a) {
